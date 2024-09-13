@@ -174,7 +174,7 @@ def main():
 
     # Adjust layout
     plt.tight_layout()
-    # plt.show()
+    plt.show()
 
     # save_dataframe(final_plate, "PS Sty Mixtures 12-Sep Blank and Background Corrected.csv", output)
 
