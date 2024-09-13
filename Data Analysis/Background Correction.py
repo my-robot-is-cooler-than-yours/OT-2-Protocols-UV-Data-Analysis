@@ -5,6 +5,7 @@ import numpy as np
 import os
 
 # Define file paths
+unprocessed = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\12-Sep-2024\PS Sty Mixtures 12 Sept RAW.csv"
 raw_data = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\12-Sep-2024\PS Sty Mixtures 12 Sept RAW processed.csv"
 plate_background = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Empty Plate Specs\Processed\Empty Plate 1c.csv"
 concs = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\concentrations.csv"
@@ -18,6 +19,28 @@ def load_data(path_input):
     except Exception as e:
         print(f"Error loading file: {e}")
         return None
+
+
+def reformat_df(df, meta_rows):
+    # Remove the metadata rows
+    df = df.iloc[meta_rows:].reset_index(drop=True)
+
+    # Preserve the first two column headers ('Well Row' and 'Well Col')
+    new_columns = ['Well\nRow', 'Well\nCol'] + df.iloc[0, 2:].tolist()
+
+    # Set the new column headers
+    df.columns = new_columns
+
+    # Remove the row that was used for new column headers
+    df = df.drop(0).reset_index(drop=True)
+
+    # Convert col column to int
+    df['Well\nCol'] = pd.to_numeric(df['Well\nCol'], errors='coerce')
+
+    # Sort by column values to ensure wells are read top to bottom across the plate
+    df_sorted = df.sort_values(by=['Well\nCol', 'Well\nRow'], ascending=[True, True]).reset_index(drop=True)
+
+    return df_sorted
 
 
 def separate_columns(df):
@@ -134,6 +157,11 @@ def main():
     raw_df = load_data(raw_data)
     plate_df = load_data(plate_background)
     concs_df = load_data(concs)
+    unprocessed_df = load_data(unprocessed)
+
+    # Reformat the raw data and save
+    formatted_raw_data = reformat_df(unprocessed_df, 10)
+    save_dataframe(formatted_raw_data, 'file name.csv', output)
 
     raw_numeric, _, _, _ = separate_columns(raw_df)
     plate_numeric, _, _, _ = separate_columns(plate_df)
