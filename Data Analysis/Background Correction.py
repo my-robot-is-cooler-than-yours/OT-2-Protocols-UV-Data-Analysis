@@ -1,8 +1,13 @@
 import pandas as pd
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 import os
+
+mpl.rcParams.update({'font.size': 12})
+mpl.rcParams['figure.dpi'] = 600
+mpl.rcParams['font.family'] = 'Times New Roman'
 
 # Define file paths
 unprocessed = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\12-Sep-2024\PS Sty Mixtures 12 Sept RAW.csv"
@@ -89,6 +94,8 @@ def group_and_calculate(df, operation='mean', group_size=4):
 
 
 def combine_sample_names(df, sample_names, blanks=None):
+    """Combines a dataframe containing sample names with another dataframe.
+    Option to specify how many blanks were taken to avoid misalignment. """
     if blanks is None:
         joined = pd.concat([sample_names, df.reset_index(drop=True)], axis=1)
         return joined
@@ -134,22 +141,38 @@ def plot_heatmap(df, value_col, title, ax):
     ax.set_title(title)
 
 
-def plot_line(df, x_col_start, x_col_end, ax, title="Absorbance Spectra", num_samples=4, wavelength_range=(220, 1000),
+def plot_line(df, x_col_start, x_col_end, ax, title="Absorbance Spectra", samples_start=0, samples_end=4, wavelength_range=(220, 1000),
               ylim=(-1.0, 2)):
     """Plot absorbance spectra for the selected number of samples."""
-    x = [int(i) for i in df.columns[x_col_start:x_col_end].values]
-    y = [df.iloc[i, x_col_start:x_col_end].values for i in range(num_samples)]
+    x = [int(i) for i in df.columns[x_col_start:x_col_end].values]  # Wavelength values
+    y = [df.iloc[i, x_col_start:x_col_end].values for i in range(samples_start, samples_end)]  # Absorbance values
 
-    for i in range(len(y)):
-        ax.plot(x, y[i], label=f'{df.iloc[i, 1]}')
+    for i in range(samples_start, samples_end):
+        ax.plot(x, df.iloc[i, x_col_start:x_col_end].values, label=f'{df.iloc[i,2]}')  # Use the index as the label
 
     ax.set_xlim(wavelength_range)
     ax.set_ylim(ylim)
+
     ax.set_xticks(np.arange(wavelength_range[0], wavelength_range[1], 10))
-    ax.grid(True, 'major', 'y')
+
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_visible(True)
+    ax.spines['bottom'].set_visible(True)
+    ax.spines['top'].set_visible(False)
+
+    # Change spine width
+    for axis in ['top', 'bottom', 'left', 'right']:
+        ax.spines[axis].set_linewidth(0.5)
+
+    ax.minorticks_on()
+    ax.tick_params(axis='both', which='both', direction='in')
+
     ax.set_title(title)
     ax.set_xlabel("Wavelength (nm)")
     ax.set_ylabel("Absorbance (AU)")
+
+    ax.grid(True, linestyle='-', linewidth=0.2, which='major', axis='both')
+    ax.legend(loc='best', fontsize=8)
 
 
 def main():
@@ -159,49 +182,28 @@ def main():
     concs_df = load_data(concs)
     unprocessed_df = load_data(unprocessed)
 
-    # Reformat the raw data and save
-    formatted_raw_data = reformat_df(unprocessed_df, 10)
-    save_dataframe(formatted_raw_data, 'file name.csv', output)
-
-    raw_numeric, _, _, _ = separate_columns(raw_df)
-    plate_numeric, _, _, _ = separate_columns(plate_df)
-    pate_removed = subtract_background(raw_numeric, plate_numeric)
-    processed = subtract_blank_row(pate_removed)
-
-    averaged = group_and_calculate(processed, 'mean', 2)
-    joined = combine_sample_names(averaged, concs_df, 2)
-    print(joined)
-
     # Process data for plotting
     final_plate = separate_subtract_and_recombine(raw_df, plate_df)
 
     # Set up subplots
-    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(30, 20))
-
-    # Plot heatmap on row 0 col 1 subplot
-    plot_heatmap(final_plate,
-                 value_col='260',
-                 title='Plate & Blank Corrected Absorbance of PS/Styrene Mixtures in BuOAc at 260 nm',
-                 ax=axes[0, 1])
-
-    # Plot second heatmap on row 1 col 1 subplot
-    plot_heatmap(final_plate,
-                 value_col='282',
-                 title='Plate & Blank Corrected Absorbance of PS/Styrene Mixtures in BuOAc at 282 nm',
-                 ax=axes[1, 1])
+    fig, axes = plt.subplots(nrows=2, figsize=(8, 10))
 
     # Plot absorbance spectra for plate + blank background corrected samples on row 0 col 0 subplot
     plot_line(final_plate,
               x_col_start=3,
               x_col_end=final_plate.shape[1],
-              ax=axes[0, 0],
+              ax=axes[0],
               title="Plate & Blank Corrected Absorbance Spectra of PS/Styrene Mixtures in BuOAc",
-              num_samples=final_plate.shape[0],
-              wavelength_range=(220, 400),
+              samples_start=2,
+              samples_end=6,
+              wavelength_range=(220, 320),
               ylim=(-1, 2))
+
+    plot_heatmap(final_plate, '282', "Heatmap Test", axes[1])
 
     # Adjust layout
     plt.tight_layout()
+    plt.savefig('what the fuck.png')
     plt.show()
 
     # save_dataframe(final_plate, "PS Sty Mixtures 12-Sep Blank and Background Corrected.csv", output)
