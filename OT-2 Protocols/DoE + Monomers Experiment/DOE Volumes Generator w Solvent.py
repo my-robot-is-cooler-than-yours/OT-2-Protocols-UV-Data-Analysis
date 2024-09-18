@@ -56,12 +56,12 @@ else:
     print("ERROR: Some samples are not unique.")
 
 # Print and plot the verified design
-# print(scaled_lhs)
-# print(volume_sums)
-#
+print(scaled_lhs)
+print(volume_sums)
+
 # Visualises the spread of sample points in 2D
-# plt.scatter(scaled_lhs[:, 0], scaled_lhs[:, 1])
-# plt.show()
+plt.scatter(scaled_lhs[:, 0], scaled_lhs[:, 1])
+plt.show()
 
 # fig = plt.figure(figsize=(10, 8))
 # ax = fig.add_subplot(111, projection='3d')
@@ -75,26 +75,26 @@ else:
 # plt.show()
 #
 
-# Convert to a pandas DataFrame
-DF = pd.DataFrame(scaled_lhs, columns=['Styrene (µL)', 'Polystyrene (µL)', 'Solvent (µL)'])
-
-# Save to CSV
-DF.to_csv("Volumes.csv", index=False)
-
-solvent_volumes = scaled_lhs[:, 2]
-solvent_volumes = np.repeat(solvent_volumes, 2)
-
-styrene_volumes = scaled_lhs[:, 0]
-styrene_volumes = np.repeat(styrene_volumes, 2)
-
-polystyrene_volumes = scaled_lhs[:, 1]
-polystyrene_volumes = np.repeat(polystyrene_volumes, 2)
-
-processed_lhs = np.column_stack((styrene_volumes, polystyrene_volumes, solvent_volumes))
-
-# Convert to a pandas DataFrame
-DF = pd.DataFrame(processed_lhs, columns=['Styrene (µL)', 'Polystyrene (µL)', 'Solvent (µL)'])
-
-# Save to CSV
-DF.to_csv("Volumes_Duplicated.csv", index=False)
+# # Convert to a pandas DataFrame
+# DF = pd.DataFrame(scaled_lhs, columns=['Styrene (µL)', 'Polystyrene (µL)', 'Solvent (µL)'])
+#
+# # Save to CSV
+# DF.to_csv("Volumes.csv", index=False)
+#
+# solvent_volumes = scaled_lhs[:, 2]
+# solvent_volumes = np.repeat(solvent_volumes, 2)
+#
+# styrene_volumes = scaled_lhs[:, 0]
+# styrene_volumes = np.repeat(styrene_volumes, 2)
+#
+# polystyrene_volumes = scaled_lhs[:, 1]
+# polystyrene_volumes = np.repeat(polystyrene_volumes, 2)
+#
+# processed_lhs = np.column_stack((styrene_volumes, polystyrene_volumes, solvent_volumes))
+#
+# # Convert to a pandas DataFrame
+# DF = pd.DataFrame(processed_lhs, columns=['Styrene (µL)', 'Polystyrene (µL)', 'Solvent (µL)'])
+#
+# # Save to CSV
+# DF.to_csv("Volumes_Duplicated.csv", index=False)
 
