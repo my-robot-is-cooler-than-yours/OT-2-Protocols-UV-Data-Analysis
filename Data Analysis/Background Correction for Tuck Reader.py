@@ -230,13 +230,13 @@ def main():
 
 def main_2(): # Linear fitting code
 
-    styrene_spectrum = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Styrene & PS Cuvette Specs\Styr 0.00625 mgml Processed.csv")
-    polystyrene_spectrum = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Styrene & PS Cuvette Specs\PS 0.1042 mgml Processed.csv")
+    styrene_spectrum = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Styrene & PS Cuvette Specs\Kelly Plate Reader Specs\Styr 0.0250 mgmL Cuvette Processed.csv")
+    polystyrene_spectrum = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Styrene & PS Cuvette Specs\Kelly Plate Reader Specs\PS 0.250 mgmL Cuvette Processed.csv")
 
-    concs_df = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Concentrations_Duplicated.csv")
+    concs_df = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Volumes 18-Sep for sorting.csv")
 
-    raw_df = load_data(raw_data)
-    plate_df = load_data(plate_background)
+    raw_df = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\new data with old method\data from two mixtures.CSV")
+    plate_df = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\new data with old method\empty plate.CSV")
 
     # Process data for plotting
     final_plate = separate_subtract_and_recombine(raw_df, plate_df)
@@ -299,10 +299,10 @@ def main_2(): # Linear fitting code
         # Get R^2
         R_squared = 1 - (SS_res / SS_tot)
 
-        # print(f"Coefficient of styrene: {c_styrene_opt: .4f}")
-        # print(f"Coefficient of polystyrene: {c_polystyrene_opt: .4f}")
-        # print(f"Ratio of c(Styr) to c(p[Styr]): {ratio_pred: .4f}, {ratio_actual: .4f}")
-        # print(f"R Squared Value: {R_squared: .2f}")
+        print(f"Coefficient of styrene: {c_styrene_opt: .4f}")
+        print(f"Coefficient of polystyrene: {c_polystyrene_opt: .4f}")
+        print(f"Ratio of c(Styr) to c(p[Styr]): {ratio_pred: .4f}, {ratio_actual: .4f}")
+        print(f"R Squared Value: {R_squared: .2f}")
 
     # Convert x and y to NumPy arrays
     x = np.array(x)
@@ -335,7 +335,7 @@ def main_2(): # Linear fitting code
     ax.grid(True, linestyle='-', linewidth=0.2, which='major', axis='both')
     ax.legend(loc='best', fontsize=8)
 
-    plt.savefig(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\model linear fit.png")
+    plt.savefig(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\new data with old method\test.png")
 
     # wavelengths = superimp.columns.astype(float)[40:101]
     #
@@ -376,4 +376,4 @@ def main_3():
 
 
 if __name__ == "__main__":
-    main_3()
+    main_2()
