@@ -1,10 +1,10 @@
-import pandas as pd
+import os
+
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import seaborn as sns
 import numpy as np
-import os
-import math
+import pandas as pd
+import seaborn as sns
 from cycler import cycler
 from scipy.optimize import minimize
 
@@ -119,6 +119,8 @@ def group_and_calculate(df, operation='mean', group_size=4):
         grouped_df = df.groupby(df.index // group_size).mean()
     elif operation == 'std':
         grouped_df = df.groupby(df.index // group_size).std()
+    else:
+        grouped_df = df.groupby(df.index // group_size)
 
     # Reset index
     grouped_df = grouped_df.reset_index(drop=True)
@@ -209,34 +211,20 @@ def plot_line(df, x_col_start, x_col_end, ax, title="Absorbance Spectra", sample
     ax.legend(loc='best', fontsize=8)
 
 
-def main():
-    raw_styrene = load_data(
-        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Styr 0.0250 mgmL Cuvette Processed.csv")
-    raw_polystyrene = load_data(
-        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\PS 0.250 mgmL Cuvette Processed.csv")
+def main():  # Linear fitting code
 
-    raw_df = load_data(raw_data)
-    plate_df = load_data(plate_background)
-    concs_df = load_data(concs)
-    unprocessed_df = load_data(unprocessed)
+    styrene_spectrum = load_data(
+        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Styrene & PS Cuvette Specs\Kelly Plate Reader Specs\Styr 0.0250 mgmL Cuvette Processed.csv")
+    polystyrene_spectrum = load_data(
+        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Styrene & PS Cuvette Specs\Kelly Plate Reader Specs\PS 0.250 mgmL Cuvette Processed.csv")
 
-    # Process data for plotting
-    final_plate = separate_subtract_and_recombine(raw_df, plate_df)
+    concs_df = load_data(
+        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Volumes 18-Sep for sorting.csv")
 
-    num_styrene, non_numeric_cols, col_column, original_columns = separate_columns(raw_styrene)
-    num_polystyrene, _, _, _ = separate_columns(raw_polystyrene)
-
-    # Plot
-
-def main_2(): # Linear fitting code
-
-    styrene_spectrum = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Styrene & PS Cuvette Specs\Kelly Plate Reader Specs\Styr 0.0250 mgmL Cuvette Processed.csv")
-    polystyrene_spectrum = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Styrene & PS Cuvette Specs\Kelly Plate Reader Specs\PS 0.250 mgmL Cuvette Processed.csv")
-
-    concs_df = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Volumes 18-Sep for sorting.csv")
-
-    raw_df = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\new data with old method\data from two mixtures.CSV")
-    plate_df = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\new data with old method\empty plate.CSV")
+    raw_df = load_data(
+        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\new data with old method\data from two mixtures.CSV")
+    plate_df = load_data(
+        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\new data with old method\empty plate.CSV")
 
     # Process data for plotting
     final_plate = separate_subtract_and_recombine(raw_df, plate_df)
@@ -256,9 +244,9 @@ def main_2(): # Linear fitting code
     x = []
     y = []
 
-    for i in range(4, final_plate.shape[0]): # Start at index 4 so blanks not included
+    for i in range(4, final_plate.shape[0]):  # Start at index 4 so blanks not included
         unknown = final_plate.iloc[i, 3:].values  # 1D array for the unknown mixture absorbance at index i (represents each well read vertically)
-        unknown_spectrum = unknown[40:101] # Slice to appropriate range
+        unknown_spectrum = unknown[40:101]  # Slice to appropriate range
 
         # Define the objective function that calculates the error (residual) between the mixture and the linear combination of styrene and polystyrene
         def residuals(coeffs):
@@ -290,19 +278,19 @@ def main_2(): # Linear fitting code
         fitted_spectrum = c_styrene_opt * styrene_spectrum + c_polystyrene_opt * polystyrene_spectrum
 
         # Calculate R^2
-        # SS_res: Sum of squared residuals
-        SS_res = np.sum((unknown_spectrum - fitted_spectrum) ** 2)
+        # ss_res: Sum of squared residuals
+        ss_res = np.sum((unknown_spectrum - fitted_spectrum) ** 2)
 
-        # SS_tot: Total sum of squares (variance of the observed mixture)
-        SS_tot = np.sum((unknown_spectrum - np.mean(unknown_spectrum)) ** 2)
+        # ss_tot: Total sum of squares (variance of the observed mixture)
+        ss_tot = np.sum((unknown_spectrum - np.mean(unknown_spectrum)) ** 2)
 
         # Get R^2
-        R_squared = 1 - (SS_res / SS_tot)
+        r_squared = 1 - (ss_res / ss_tot)
 
         print(f"Coefficient of styrene: {c_styrene_opt: .4f}")
         print(f"Coefficient of polystyrene: {c_polystyrene_opt: .4f}")
         print(f"Ratio of c(Styr) to c(p[Styr]): {ratio_pred: .4f}, {ratio_actual: .4f}")
-        print(f"R Squared Value: {R_squared: .2f}")
+        print(f"R Squared Value: {r_squared: .2f}")
 
     # Convert x and y to NumPy arrays
     x = np.array(x)
@@ -335,7 +323,8 @@ def main_2(): # Linear fitting code
     ax.grid(True, linestyle='-', linewidth=0.2, which='major', axis='both')
     ax.legend(loc='best', fontsize=8)
 
-    plt.savefig(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\new data with old method\test.png")
+    plt.savefig(
+        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\new data with old method\test.png")
 
     # wavelengths = superimp.columns.astype(float)[40:101]
     #
@@ -350,7 +339,8 @@ def main_2(): # Linear fitting code
     # plt.legend()
     # plt.savefig(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Styrene & PS Cuvette Specs\diluted test.png")
 
-def main_3():
+
+def main_2():  # Plotting
     path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\240918_1620.csv"
 
     new_raw_data = load_data(path)
