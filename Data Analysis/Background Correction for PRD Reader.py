@@ -8,6 +8,7 @@ from cycler import cycler
 from scipy.optimize import minimize
 from sklearn import linear_model
 from sklearn.metrics import mean_squared_error, r2_score
+import time
 
 mpl.rcParams.update({'font.size': 12})
 mpl.rcParams['figure.dpi'] = 600
@@ -31,6 +32,20 @@ raw_data = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\D
 plate_background = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Empty Plate Specs\Processed\Empty Plate 1c.csv"
 concs = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\concentrations.csv"
 output = ""
+
+
+def timeit(func):
+    """
+    Decorator for measuring function's running time.
+    """
+    def measure_time(*args, **kw):
+        start_time = time.time()
+        result = func(*args, **kw)
+        print("Processing time of %s(): %.2f seconds."
+              % (func.__qualname__, time.time() - start_time))
+        return result
+
+    return measure_time
 
 
 def load_data(path_input):
@@ -184,7 +199,7 @@ def plot_heatmap(df, value_col, title, ax):
 
 def plot_line(df, x_col_start, x_col_end, ax, title="Absorbance Spectra", samples_start=0, samples_end=4,
               wavelength_range=(220, 1000),
-              ylim=(-1.0, 2)):
+              ylim=(-1.0, 2), legend=True):
     """Plot absorbance spectra for the selected number of samples."""
     x = [int(i) for i in df.columns[x_col_start:x_col_end].values]  # Wavelength values
     y = [df.iloc[i, x_col_start:x_col_end].values for i in range(samples_start, samples_end)]  # Absorbance values
@@ -195,7 +210,7 @@ def plot_line(df, x_col_start, x_col_end, ax, title="Absorbance Spectra", sample
     ax.set_xlim(wavelength_range)
     ax.set_ylim(ylim)
 
-    ax.set_xticks(np.arange(wavelength_range[0], wavelength_range[1], 10))
+    # ax.set_xticks(np.arange(wavelength_range[0], wavelength_range[1], 1))
 
     ax.spines['right'].set_visible(False)
     ax.spines['left'].set_visible(True)
@@ -214,51 +229,11 @@ def plot_line(df, x_col_start, x_col_end, ax, title="Absorbance Spectra", sample
     ax.set_ylabel("Absorbance (AU)")
 
     ax.grid(True, linestyle='-', linewidth=0.2, which='major', axis='both')
-    ax.legend(loc='best', fontsize=8)
 
-
-def main_3():
-    path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Plate 2a.csv"
-    data_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\240919_1305.csv"
-    out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024"
-
-    data = load_data_new(data_path)
-    plate_2a = load_data_new(path)
-
-    data_corrected = separate_subtract_and_recombine(data, plate_2a)
-
-    # # Set up subplots
-    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(16, 12))
-
-    plot_line(data,
-              x_col_start=1,
-              x_col_end=data.shape[1],
-              ax=axes[0, 0],
-              title="Test",
-              samples_start=0,
-              samples_end=data.shape[0],
-              wavelength_range=(220, 320),
-              ylim=(-1, 3.5)
-              )
-
-    plot_line(data_corrected,
-              x_col_start=1,
-              x_col_end=data.shape[1],
-              ax=axes[0, 1],
-              title="Test",
-              samples_start=0,
-              samples_end=data.shape[0],
-              wavelength_range=(220, 320),
-              ylim=(-1, 3.5)
-              )
-
-    axes[0, 0].set_xticks(axes[0, 0].get_xticks()[::10])
-    axes[0, 1].set_xticks(axes[0, 1].get_xticks()[::10])
-
-    plot_heatmap(data, 280, "Heatmap of Plate 2a Background at 280 nm", ax=axes[1, 0])
-    plot_heatmap(data_corrected, 280, "Heatmap of Plate 2a Background at 280 nm", ax=axes[1, 1])
-
-    plt.savefig(out_path + "\plots.png")
+    if legend is True:
+        ax.legend(loc='best', fontsize=8)
+    else:
+        pass
 
 
 def main_4():  # LSR curve fitting and linear regression model code
@@ -387,42 +362,40 @@ def main_4():  # LSR curve fitting and linear regression model code
 
     # <editor-fold desc="For plotting scatterplots of predicted vs actual fraction outputs">
     # Plot the results
-    # fig, ax = plt.subplots(figsize=(8, 5))
-    #
-    # plt.scatter(styrene_components_actual, styrene_components_pred, color='black', label='Styrene', s=25)
-    # plt.scatter(ps_components_actual, ps_components_pred, color='red', label='Polystyrene', s=25)
-    #
-    # ax.spines['right'].set_visible(False)
-    # ax.spines['left'].set_visible(True)
-    # ax.spines['bottom'].set_visible(True)
-    # ax.spines['top'].set_visible(False)
-    #
-    # # Change spine width
-    # for axis in ['top', 'bottom', 'left', 'right']:
-    #     ax.spines[axis].set_linewidth(0.5)
-    #
-    # ax.minorticks_on()
-    # ax.tick_params(axis='both', which='both', direction='in', pad=10)
-    #
-    # ax.set_title("Actual vs Predicted Spectral Fractions in Styrene/PS Mixtures")
-    # ax.set_xlabel("Actual Fraction")
-    # ax.set_ylabel("Predicted Spectral Fraction")
-    #
-    # ax.set_xlim(left=0)
-    # ax.set_ylim(bottom=0)
-    #
-    # ax.grid(True, linestyle='-', linewidth=0.2, which='major', axis='both')
-    # ax.legend(loc='best', fontsize=8)
+    fig, ax = plt.subplots(figsize=(8, 5))
 
-    # plt.savefig(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\PS Styr Conc Fraction plot test.png")
+    plt.scatter(styrene_components_actual, styrene_components_pred, color='black', label='Styrene', s=25)
+    plt.scatter(ps_components_actual, ps_components_pred, color='red', label='Polystyrene', s=25)
+
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_visible(True)
+    ax.spines['bottom'].set_visible(True)
+    ax.spines['top'].set_visible(False)
+
+    # Change spine width
+    for axis in ['top', 'bottom', 'left', 'right']:
+        ax.spines[axis].set_linewidth(0.5)
+
+    ax.minorticks_on()
+    ax.tick_params(axis='both', which='both', direction='in', pad=10)
+
+    ax.set_title("Actual vs Predicted Spectral Fractions in Styrene/PS Mixtures")
+    ax.set_xlabel("Actual Fraction")
+    ax.set_ylabel("Predicted Spectral Fraction")
+
+    ax.set_xlim(left=0)
+    ax.set_ylim(bottom=0)
+
+    ax.grid(True, linestyle='-', linewidth=0.2, which='major', axis='both')
+    ax.legend(loc='best', fontsize=8)
+
+    plt.savefig(
+        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\PS Styr Conc Fraction plot test.png")
     # </editor-fold>
 
     # Split the data into training/testing sets
     x_train = np.array(styrene_components_pred[:-20]).reshape(-1, 1)
     x_test = np.array(styrene_components_pred[-20:]).reshape(-1, 1)
-
-    # x_train = x_train[~np.isnan(x_train).any(axis=1)]
-    # x_test = x_test[~np.isnan(x_test).any(axis=1)]
 
     # Split the targets into training/testing sets
     y_train = styrene_components_actual[:-20]
@@ -481,12 +454,14 @@ def main_4():  # LSR curve fitting and linear regression model code
     # </editor-fold>
 
     # Read in previous data for testing the model - uses old reader data so not best comparison
-    old_data = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\12-Sep-2024\PS Sty Mixtures 12-Sep Blank and Background Corrected.csv")
-    vols = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Volumes_Duplicated.csv")
+    old_data = load_data(
+        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\12-Sep-2024\PS Sty Mixtures 12-Sep Blank and Background Corrected.csv")
+    vols = load_data(
+        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Volumes_Duplicated.csv")
 
     # Extract sample curve and conc
     sample = old_data.iloc[6, 3:][range_start:]
-    styrene_conc = vols.iloc[6, 0]*.025/300
+    styrene_conc = vols.iloc[6, 0] * .025 / 300
 
     # Objective function
     def residuals(coeffs):
@@ -500,7 +475,7 @@ def main_4():  # LSR curve fitting and linear regression model code
     # Extract the fitted coefficients (concentrations)
     c_styrene_opt, c_polystyrene_opt = result.x
 
-    c_styrene_opt = np.array([c_styrene_opt]).reshape(-1,1)
+    c_styrene_opt = np.array([c_styrene_opt]).reshape(-1, 1)
 
     # Make predictions using the testing set
     y_pred = regr.predict(c_styrene_opt)
@@ -508,5 +483,221 @@ def main_4():  # LSR curve fitting and linear regression model code
     print(y_pred)
 
 
+# Function to prepare component spectra
+def prepare_spectra(styrene_spectrum_path, polystyrene_spectrum_path, range_start, range_end):
+    styrene_spectrum = load_data_new(styrene_spectrum_path)
+    polystyrene_spectrum = load_data_new(polystyrene_spectrum_path)
+
+    num_styrene, _, _ = separate_columns(styrene_spectrum)
+    num_polystyrene, _, _ = separate_columns(polystyrene_spectrum)
+
+    return num_styrene.values[0][range_start:range_end], num_polystyrene.values[0][range_start:range_end]
+
+
+# Function to fit spectra to a linear combination of styrene and polystyrene
+def fit_spectra(sample_spectrum, styrene_spectrum, polystyrene_spectrum):
+    def residuals(coeffs):
+        c_styrene, c_polystyrene = coeffs
+        combined_spectrum = c_styrene * styrene_spectrum + c_polystyrene * polystyrene_spectrum
+        return np.sum((sample_spectrum - combined_spectrum) ** 2)  # Sum of squared residuals
+
+    initial_guess = [0.5, 0.5]
+    bounds = [(0, None), (0, None)]  # Bounds for coefficients
+
+    result = minimize(residuals, initial_guess, bounds=bounds)
+    return result.x  # Return optimized coefficients for both styrene and polystyrene as tuple which is unpacked in process_samples function
+
+
+# Function to calculate R-squared
+def calculate_r_squared(sample_spectrum, fitted_spectrum):
+    SS_res = np.sum((sample_spectrum - fitted_spectrum) ** 2)
+    SS_tot = np.sum((sample_spectrum - np.mean(sample_spectrum)) ** 2)
+    return 1 - (SS_res / SS_tot)
+
+
+# Function to process each sample spectrum and fit to components
+def process_samples(data_df, volumes_df, styrene_spectrum, polystyrene_spectrum, range_start, range_end, plot_spectra=False):
+    styrene_components_pred, styrene_components_actual = [], []
+    ps_components_pred, ps_components_actual = [], []
+
+    for i in range(data_df.shape[0]):
+        unknown_spectrum = data_df.select_dtypes(include='number').iloc[i, :].values[range_start:range_end]
+        c_styrene_opt, c_polystyrene_opt = fit_spectra(unknown_spectrum, styrene_spectrum, polystyrene_spectrum)
+
+        fitted_spectrum = c_styrene_opt * styrene_spectrum + c_polystyrene_opt * polystyrene_spectrum
+
+        styrene_components_pred.append(c_styrene_opt)
+        styrene_components_actual.append(volumes_df.iloc[i, 0] * .025 / 300)
+        ps_components_pred.append(c_polystyrene_opt)
+        ps_components_actual.append(volumes_df.iloc[i, 1] * .25 / 300)
+
+        # Debugging print statements
+        print(f"Sample {i}: Styrene: {c_styrene_opt:.4f}, Polystyrene: {c_polystyrene_opt:.4f}")
+
+        if plot_spectra is True:
+            # Plot the results
+            fig, ax = plt.subplots(figsize=(8, 5))
+
+            wavelengths = data_df.select_dtypes(include='number').columns.astype(float)[range_start:range_end]
+
+            plt.plot(wavelengths, unknown_spectrum, label='Observed Mixture Spectrum', color='black')
+            plt.plot(wavelengths, styrene_spectrum*c_styrene_opt, label='Predicted Styrene Component', color='Red', linestyle="-.")
+            plt.plot(wavelengths, polystyrene_spectrum*c_polystyrene_opt, label='Predicted Polystyrene Component', color='Green', linestyle="-.")
+            plt.plot(wavelengths, fitted_spectrum, label='Fitted Spectrum', color='Blue', linestyle="--")
+
+            ax.spines['right'].set_visible(False)
+            ax.spines['left'].set_visible(True)
+            ax.spines['bottom'].set_visible(True)
+            ax.spines['top'].set_visible(False)
+
+            # Change spine width
+            for axis in ['top', 'bottom', 'left', 'right']:
+                ax.spines[axis].set_linewidth(0.5)
+
+            ax.minorticks_on()
+            ax.tick_params(axis='both', which='both', direction='in', pad=10)
+
+            ax.set_xlabel("Wavelength (nm)")
+            ax.set_ylabel("Absorbance")
+
+            ax.grid(True, linestyle='-', linewidth=0.2, which='major', axis='both')
+            ax.legend(loc='best', fontsize=8)
+
+            plt.savefig(
+                rf"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\23-Sep-2024\Predicted Component Figures\index {i}")
+        else:
+            pass
+
+    return styrene_components_pred, styrene_components_actual, ps_components_pred, ps_components_actual
+
+
+# Function to perform linear regression and evaluate
+def linear_regression(x_train, y_train, x_test, y_test):
+    regr = linear_model.LinearRegression()
+    regr.fit(x_train, y_train)
+    y_pred = regr.predict(x_test)
+
+    print(f"Equation: y = {regr.coef_[0]:.4f}x + {regr.intercept_:.4f}")
+    print(f"Mean squared error: {mean_squared_error(y_test, y_pred):.4f}")
+    print(f"R^2: {r2_score(y_test, y_pred):.4f}")
+
+    return regr, y_pred
+
+
+# Function to plot results
+def plot_results(x_test, y_test, y_pred, regr, output_path, title, y_axis_label):
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    plt.plot(x_test, y_pred, color='red', label=f"Expected Fit y = {regr.coef_[0]: .4f}x + {regr.intercept_: .4f}",
+             # Plot test data against predicted values
+             linewidth="1", zorder=0)
+    plt.scatter(x_test, y_test, color='black', label='Test Data', s=25)  # Plot test data against actual values
+
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_visible(True)
+    ax.spines['bottom'].set_visible(True)
+    ax.spines['top'].set_visible(False)
+
+    # Change spine width
+    for axis in ['top', 'bottom', 'left', 'right']:
+        ax.spines[axis].set_linewidth(0.5)
+
+    ax.set_title(title)
+    ax.set_xlabel("Predicted Spectral Fraction")
+    ax.set_ylabel(y_axis_label)
+
+    ax.minorticks_on()
+    ax.tick_params(axis='both', which='both', direction='in', pad=10)
+
+    ax.set_xlim(left=0)
+    ax.set_ylim(bottom=0)
+
+    ax.grid(True, linestyle='-', linewidth=0.2, which='major', axis='both')
+    ax.legend(loc='best', fontsize=8)
+
+    plt.savefig(output_path)
+
+
+# Main function to orchestrate the workflow
+@timeit
+def curve_fitting_lin_reg():
+    # Paths
+    plate_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Plate 2a.csv"
+    data_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\240919_1305.csv"
+    styrene_spectrum_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Styrene & PS Cuvette Specs\PRD Plate Reader Specs\styrene 0.025 mgmL.csv"
+    polystyrene_spectrum_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Styrene & PS Cuvette Specs\PRD Plate Reader Specs\polystyrene 0.250 mgmL.csv"
+    volumes_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Volumes 18-Sep Duplicated.csv"
+    out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\23-Sep-2024"
+
+    # Load data
+    data_corrected = separate_subtract_and_recombine(load_data_new(data_path), load_data_new(plate_path))
+    styrene_spectrum, polystyrene_spectrum = prepare_spectra(styrene_spectrum_path, polystyrene_spectrum_path, 40, 101)
+    volumes_df = load_data(volumes_path)
+
+    # Process samples and get fitted coefficients
+    styrene_pred, styrene_actual, ps_pred, ps_actual = process_samples(data_corrected, volumes_df, styrene_spectrum,
+                                                                       polystyrene_spectrum, 40, 101, plot_spectra=True)
+
+    # Styrene
+    # Split into training and test data
+    x_train, x_test = np.array(styrene_pred[:-20]).reshape(-1, 1), np.array(styrene_pred[-20:]).reshape(-1, 1)
+    y_train, y_test = styrene_actual[:-20], styrene_actual[-20:]
+
+    # Perform linear regression
+    regr_styrene, y_pred = linear_regression(x_train, y_train, x_test, y_test)
+
+    # Plot and save results
+    # plot_results(x_test, y_test, y_pred, regr_styrene, rf"{out_path}\linear model styrene.png",
+    #              "Predicted Spectral Fraction vs Actual Concentration of Styrene", "Styrene Concentration (mg/mL)")
+
+    # Polystyrene
+    # Split into training and test data
+    x_train, x_test = np.array(ps_pred[:-20]).reshape(-1, 1), np.array(ps_pred[-20:]).reshape(-1, 1)
+    y_train, y_test = ps_actual[:-20], ps_actual[-20:]
+
+    # Perform linear regression
+    regr_polystyrene, y_pred = linear_regression(x_train, y_train, x_test, y_test)
+
+    # Plot and save results
+    # plot_results(x_test, y_test, y_pred, regr_polystyrene, rf"{out_path}\linear model polystyrene.png",
+    #              "Predicted Spectral Fraction vs Actual Concentration of Polystyrene",
+    #              "Polystyrene Concentration (mg/mL)")
+
+    # Pass in new data from 23-Sep Expt
+    new_data_raw_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\23-Sep-2024\240923_1512.csv"
+    plate_2c_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\23-Sep-2024\plate 2c.csv"
+    new_volumes_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\23-Sep-2024\Volumes No Solvent 23-Sep Duplicated.csv"
+
+    new_data_raw = load_data_new(new_data_raw_path)
+    plate_2c = load_data_new(plate_2c_path)
+    new_volumes_df = load_data(new_volumes_path)
+
+    # Process background etc
+    new_data_processed = separate_subtract_and_recombine(new_data_raw, plate_2c)
+
+    # Deconvolute using cuvette peaks and get coefficients
+    styrene_components_pred, styrene_components_actual, ps_components_pred, ps_components_actual = process_samples(
+        new_data_processed, new_volumes_df, styrene_spectrum, polystyrene_spectrum, 40, 101)
+
+    styrene_concs_pred = regr_styrene.predict(np.array(styrene_components_pred).reshape(-1, 1))
+    ps_concs_pred = regr_polystyrene.predict(np.array(ps_components_pred).reshape(-1, 1))
+
+    # Plot and save results
+    # plot_results(styrene_components_pred, styrene_components_actual, styrene_concs_pred, regr_styrene,
+    #              rf"{out_path}\new data with existing model for styrene.png",
+    #              "Predicted Spectral Fraction vs Actual Concentration of Styrene",
+    #              "Stryene Concentration (mg/mL)")
+    #
+    # plot_results(ps_components_pred, ps_components_actual, ps_concs_pred, regr_polystyrene,
+    #              rf"{out_path}\new data with existing model for polystyrene.png",
+    #              "Predicted Spectral Fraction vs Actual Concentration of Polystyrene",
+    #              "Polystyrene Concentration (mg/mL)")
+
+    print(f"Mean squared error: {mean_squared_error(styrene_components_actual, styrene_concs_pred):.4f}")
+    print(f"R^2: {r2_score(styrene_components_actual, styrene_concs_pred):.4f}")
+    print(f"Mean squared error: {mean_squared_error(ps_components_actual, ps_concs_pred):.4f}")
+    print(f"R^2: {r2_score(ps_components_actual, ps_concs_pred):.4f}")
+
+
 if __name__ == "__main__":
-    main_4()
+    curve_fitting_lin_reg()
