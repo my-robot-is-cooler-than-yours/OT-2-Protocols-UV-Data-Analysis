@@ -699,5 +699,22 @@ def curve_fitting_lin_reg():
     print(f"R^2: {r2_score(ps_components_actual, ps_concs_pred):.4f}")
 
 
+def main():
+    plate = load_data_new(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Calibration Experiments\Toluene\241004_1207.csv")
+    data = load_data_new(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Calibration Experiments\Toluene\241004_1222.csv")
+
+    print(plate[260].head(20))
+    print(data[260].head(20))
+
+    corrected = data.iloc[:,1:]-plate.iloc[:,1:]
+    blank_row = corrected.iloc[11, 1:]
+
+    corrected.apply(lambda row: row - blank_row, axis=1)
+
+    print(corrected[260].head(20))
+
+    corrected.to_csv(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Calibration Experiments\Toluene\tolune cal.csv")
+
+
 if __name__ == "__main__":
-    curve_fitting_lin_reg()
+    main()
