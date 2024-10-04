@@ -16,6 +16,7 @@ from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 import time
+from sklearn.decomposition import PCA
 
 # Set plotting parameters globally
 mpl.rcParams.update({'font.size': 12})
@@ -149,7 +150,7 @@ def separate_subtract_and_recombine(raw_df: pd.DataFrame, plate_data: pd.DataFra
 
 
 # Function to plot a heatmap from a DataFrame
-def plot_heatmap(df, value_col, title, ax, cmap='coolwarm', annot=True, fmt=".3f", cbar=True):
+def plot_heatmap(df, value_col, title, ax, cmap='coolwarm', annot=True, fmt=".3f", cbar=True) -> None:
     """
     Plot a heatmap from a DataFrame.
     Extracts row/col labels and pivots the DataFrame to a heatmap format.
@@ -181,7 +182,7 @@ def plot_heatmap(df, value_col, title, ax, cmap='coolwarm', annot=True, fmt=".3f
 
 # Function to plot absorbance spectra
 def plot_line(df, x_col_start, x_col_end, ax, title="Absorbance Spectra", samples_start=0, samples_end=1,
-              wavelength_range=(220, 1000), ylim: tuple = False, legend=True):
+              wavelength_range=(220, 1000), ylim: tuple = False, legend=True) -> None:
     """
     Plot absorbance spectra for selected samples.
 
@@ -230,7 +231,7 @@ def plot_line(df, x_col_start, x_col_end, ax, title="Absorbance Spectra", sample
 
 
 # Least squares deconvolution function using minimize
-def least_squares_deconvolution(sample_spectrum, styrene_spectrum, polystyrene_spectrum):
+def least_squares_deconvolution(sample_spectrum, styrene_spectrum, polystyrene_spectrum) -> tuple:
     """
     Perform least-squares deconvolution to find the best coefficients
     for combining styrene and polystyrene spectra to fit the sample spectrum.
@@ -238,7 +239,7 @@ def least_squares_deconvolution(sample_spectrum, styrene_spectrum, polystyrene_s
     :param sample_spectrum: Sample spectrum to fit.
     :param styrene_spectrum: Styrene reference spectrum.
     :param polystyrene_spectrum: Polystyrene reference spectrum.
-    :return: Coefficients for styrene and polystyrene.
+    :return result.x: Coefficients for styrene and polystyrene.
     """
 
     def residuals(coeffs):
@@ -360,8 +361,7 @@ def process_samples(data_df, volumes_df, styrene_spectrum, polystyrene_spectrum,
     for i in range(data_df.shape[0]):
         unknown_spectrum = data_df.select_dtypes(include='number').iloc[i, :].values[range_start:range_end]
 
-        c_styrene_opt, c_polystyrene_opt = fit_spectra(unknown_spectrum, styrene_spectrum, polystyrene_spectrum,
-                                                       deconvolution_method)
+        c_styrene_opt, c_polystyrene_opt = fit_spectra(unknown_spectrum, styrene_spectrum, polystyrene_spectrum, deconvolution_method)
 
         fitted_spectrum = c_styrene_opt * styrene_spectrum + c_polystyrene_opt * polystyrene_spectrum
 
@@ -497,7 +497,7 @@ def curve_fitting_lin_reg():
     volumes_df = load_data(volumes_path)
 
     # Choose deconvolution method here
-    deconvolution_method = scipy_curve_fit  # Or deconvolution_method_2, etc.
+    deconvolution_method = least_squares_deconvolution  # Or deconvolution_method_2, etc.
 
     styrene_pred, styrene_actual, ps_pred, ps_actual = process_samples(
         data_corrected, volumes_df, styrene_spectrum, polystyrene_spectrum, range_start, range_end,
@@ -773,4 +773,44 @@ def ml_screening():
 
 
 if __name__ == "__main__":
-    curve_fitting_lin_reg()
+    # Load data
+    plate = load_data_new(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Plate 2a.csv")
+    data = load_data_new(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\240919_1305.csv")
+    out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Test Folders\02-Oct-2024 expanded script figures"
+    volumes = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Volumes 18-Sep Duplicated.csv").to_numpy()
+
+    data = separate_subtract_and_recombine(data, plate).iloc[:, 1:]
+
+    volumes[:, 0] *= 0.025/300
+    volumes[:, 1] *= 0.25/300
+
+    # Perform PCA
+    pca = PCA(n_components=3)  # Choose the number of components to retain
+    pca_scores = pca.fit_transform(data)  # Get the scores (projections of data)
+    pca_components = pca.components_  # Get the PCs (eigenvectors)
+    explained_variance = pca.explained_variance_ratio_  # Variance explained by each PC
+
+    print(explained_variance)
+
+    # Plot the first two principal components (scores)
+    plt.figure()
+    scatter = plt.scatter(pca_scores[:, 0], pca_scores[:, 1], c=volumes[:, 0], cmap="viridis")
+    plt.xlabel('PC1')
+    plt.ylabel('PC2')
+    plt.title('PCA: UV-Vis Spectra')
+
+    # Add color bar to show concentration scale
+    cbar = plt.colorbar(scatter)
+    cbar.set_label('Concentration (mg/mL')
+
+    plt.savefig(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Test Folders\PCA figs\PCA UV-Vis Spectra colour map.png")
+
+
+    # Plot the loading of PC1 (contribution of each wavelength to PC1)
+    plt.figure()
+    plt.plot(np.arange(220, 1001) + np.arange(data.shape[1]), pca_components[0])
+    plt.xlabel('Wavelength Index')
+    plt.ylabel('Loading on PC1')
+    plt.title('PC1 Loading: Wavelength Contributions')
+    plt.xlim(220, 400)
+    plt.savefig(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Test Folders\PCA figs\PC1 Loading Wavelength Contributions 400 nm.png")
