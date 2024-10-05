@@ -35,6 +35,9 @@ custom_colors = [
 # Set the color cycle using plt.rc
 plt.rc('axes', prop_cycle=cycler('color', custom_colors))
 
+current_directory = os.getcwd()
+print(current_directory)
+
 
 def timeit(func):
     """
@@ -361,7 +364,8 @@ def process_samples(data_df, volumes_df, styrene_spectrum, polystyrene_spectrum,
     for i in range(data_df.shape[0]):
         unknown_spectrum = data_df.select_dtypes(include='number').iloc[i, :].values[range_start:range_end]
 
-        c_styrene_opt, c_polystyrene_opt = fit_spectra(unknown_spectrum, styrene_spectrum, polystyrene_spectrum, deconvolution_method)
+        c_styrene_opt, c_polystyrene_opt = fit_spectra(unknown_spectrum, styrene_spectrum, polystyrene_spectrum,
+                                                       deconvolution_method)
 
         fitted_spectrum = c_styrene_opt * styrene_spectrum + c_polystyrene_opt * polystyrene_spectrum
 
@@ -477,6 +481,66 @@ def plot_results(x_test, y_test, y_pred, regr, output_path, title, y_axis_label)
 
 
 # Main function to orchestrate the workflow
+def spectra_pca(df: pd.DataFrame, num_components: int, volumes: np.ndarray, plot_data: bool = False,
+                x_bounds: tuple = False, out_path: str = current_directory):
+    """
+    Performs principal component analysis on array of spectra. Optionally plots PC plot and wavelength contribution plot
+    colour coded with concentration.
+
+    Returns pca_scores, pca_components, explained_variance
+
+    :param df: pd.DataFrame containing sample spectra as rows.
+    :param num_components: int, number of PCs to retain.
+    :param volumes: np.ndarray, columns with volumes corresponding to each spectrum.
+    :param plot_data: bool.
+    :param x_bounds: tuple, determines x bounds on output plot.
+    :param out_path: str, output path of plot.
+    :return pca_scores: numpy.ndarray, contains PCA scores as array for corresponding num_components PCs.
+    :return pca_components: numpy.ndarray, contains PCA components as array for corresponding num_component PCs.
+    :return explained_variance: numpy.ndarray, contains the variance explained by each of the PCs.
+    """
+    # Convert volumes to concentrations
+    volumes[:, 0] *= 0.025 / 300
+    volumes[:, 1] *= 0.25 / 300
+
+    # Perform PCA
+    pca = PCA(n_components=num_components)  # Choose the number of components to retain
+    pca_scores = pca.fit_transform(df)  # Get the scores (projections of data)
+    pca_components = pca.components_  # Get the PCs (eigenvectors)
+    explained_variance = pca.explained_variance_ratio_  # Variance explained by each PC
+
+    if plot_data:
+        # Plot the first two principal components (scores)
+        plt.figure()
+        scatter = plt.scatter(pca_scores[:, 0], pca_scores[:, 1], c=volumes[:, 0], cmap="viridis")
+        plt.xlabel('PC1')
+        plt.ylabel('PC2')
+        plt.title('PCA: UV-Vis Spectra')
+
+        # Add color bar to show concentration scale
+        cbar = plt.colorbar(scatter)
+        cbar.set_label('Concentration (mg/mL')
+
+        plt.savefig(out_path)
+
+        # Plot the loading of PC1 (contribution of each wavelength to PC1)
+        plt.figure()
+        plt.plot(np.arange(data.shape[1]) + 220, pca_components[0])
+        plt.xlabel('Wavelength Index')
+        plt.ylabel('Loading on PC1')
+        plt.title('PC1 Loading: Wavelength Contributions')
+        if x_bounds:
+            plt.xlim(x_bounds)
+        else:
+            plt.xlim()
+
+        plt.savefig(out_path)
+    else:
+        pass
+
+    return pca_scores, pca_components, explained_variance
+
+
 @timeit
 def curve_fitting_lin_reg():
     # Paths
@@ -774,43 +838,15 @@ def ml_screening():
 
 if __name__ == "__main__":
     # Load data
-    plate = load_data_new(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Plate 2a.csv")
-    data = load_data_new(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\240919_1305.csv")
+    plate = load_data_new(
+        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Plate 2a.csv")
+    data = load_data_new(
+        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\240919_1305.csv")
     out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Test Folders\02-Oct-2024 expanded script figures"
-    volumes = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Volumes 18-Sep Duplicated.csv").to_numpy()
+    volumes = load_data(
+        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Volumes 18-Sep Duplicated.csv").to_numpy()
 
     data = separate_subtract_and_recombine(data, plate).iloc[:, 1:]
 
-    volumes[:, 0] *= 0.025/300
-    volumes[:, 1] *= 0.25/300
-
-    # Perform PCA
-    pca = PCA(n_components=3)  # Choose the number of components to retain
-    pca_scores = pca.fit_transform(data)  # Get the scores (projections of data)
-    pca_components = pca.components_  # Get the PCs (eigenvectors)
-    explained_variance = pca.explained_variance_ratio_  # Variance explained by each PC
-
-    print(explained_variance)
-
-    # Plot the first two principal components (scores)
-    plt.figure()
-    scatter = plt.scatter(pca_scores[:, 0], pca_scores[:, 1], c=volumes[:, 0], cmap="viridis")
-    plt.xlabel('PC1')
-    plt.ylabel('PC2')
-    plt.title('PCA: UV-Vis Spectra')
-
-    # Add color bar to show concentration scale
-    cbar = plt.colorbar(scatter)
-    cbar.set_label('Concentration (mg/mL')
-
-    plt.savefig(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Test Folders\PCA figs\PCA UV-Vis Spectra colour map.png")
-
-
-    # Plot the loading of PC1 (contribution of each wavelength to PC1)
-    plt.figure()
-    plt.plot(np.arange(220, 1001) + np.arange(data.shape[1]), pca_components[0])
-    plt.xlabel('Wavelength Index')
-    plt.ylabel('Loading on PC1')
-    plt.title('PC1 Loading: Wavelength Contributions')
-    plt.xlim(220, 400)
-    plt.savefig(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Test Folders\PCA figs\PC1 Loading Wavelength Contributions 400 nm.png")
+    x, y, z = spectra_pca(data, 3, volumes, plot_data=False, x_bounds=(220, 400),
+                          out_path=current_directory + r"\image.png")
