@@ -17,6 +17,9 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 import time
 from sklearn.decomposition import PCA
+import socket
+import pyDOE2
+import sys
 
 # Set plotting parameters globally
 mpl.rcParams.update({'font.size': 12})
@@ -36,7 +39,12 @@ custom_colors = [
 plt.rc('axes', prop_cycle=cycler('color', custom_colors))
 
 current_directory = os.getcwd()
-print(current_directory)
+
+
+def log_msg(message):
+    """Log a message with a timestamp."""
+    current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    print(f"[{current_time}] {message}")
 
 
 def timeit(func):
@@ -47,7 +55,7 @@ def timeit(func):
     def measure_time(*args, **kw):
         start_time = time.time()
         result = func(*args, **kw)
-        print(f"Processing time of {func.__qualname__}(): {time.time() - start_time:.2f} seconds.")
+        log_msg(f"Processing time of {func.__qualname__}(): {time.time() - start_time:.2f} seconds.")
         return result
 
     return measure_time
@@ -64,11 +72,11 @@ def load_data(path_input: str) -> pd.DataFrame:
     try:
         return pd.read_csv(path_input)
     except FileNotFoundError as e:
-        print(f"Error: File not found - {e}")
+        log_msg(f"Error: File not found - {e}")
     except pd.errors.EmptyDataError as e:
-        print(f"Error: Empty file - {e}")
+        log_msg(f"Error: Empty file - {e}")
     except Exception as e:
-        print(f"Error loading file: {e}")
+        log_msg(f"Error loading file: {e}")
     return pd.DataFrame()  # Return an empty DataFrame on failure
 
 
@@ -87,11 +95,11 @@ def load_data_new(path: str, start_wavelength: int = 220, end_wavelength: int = 
         df.columns = ['Row/Col'] + list(range(start_wavelength, end_wavelength + 1))
         return df
     except FileNotFoundError as e:
-        print(f"Error: File not found - {e}")
+        log_msg(f"Error: File not found - {e}")
     except pd.errors.EmptyDataError as e:
-        print(f"Error: Empty file - {e}")
+        log_msg(f"Error: Empty file - {e}")
     except Exception as e:
-        print(f"Error loading file: {e}")
+        log_msg(f"Error loading file: {e}")
     return pd.DataFrame()
 
 
@@ -178,9 +186,9 @@ def plot_heatmap(df, value_col, title, ax, cmap='coolwarm', annot=True, fmt=".3f
         ax.set_title(title)
 
     except KeyError as e:
-        print(f"Error: The DataFrame does not have the expected columns. {e}")
+        log_msg(f"Error: The DataFrame does not have the expected columns. {e}")
     except Exception as e:
-        print(f"An error occurred while plotting the heatmap: {e}")
+        log_msg(f"An error occurred while plotting the heatmap: {e}")
 
 
 # Function to plot absorbance spectra
@@ -228,9 +236,9 @@ def plot_line(df, x_col_start, x_col_end, ax, title="Absorbance Spectra", sample
             ax.legend(loc='best', fontsize=8)
 
     except KeyError as e:
-        print(f"Error: The DataFrame does not have the expected columns. {e}")
+        log_msg(f"Error: The DataFrame does not have the expected columns. {e}")
     except Exception as e:
-        print(f"An error occurred while plotting the spectra: {e}")
+        log_msg(f"An error occurred while plotting the spectra: {e}")
 
 
 # Least squares deconvolution function using minimize
@@ -273,7 +281,7 @@ def scipy_curve_fit(sample_spectrum, styrene_spectrum, polystyrene_spectrum):
         params, _ = curve_fit(model_func, wavelengths, sample_spectrum, p0=[0.5, 0.5])
         return params
     except Exception as e:
-        print(f"Error in curve fitting: {e}")
+        log_msg(f"Error in curve fitting: {e}")
         return None
 
 
@@ -298,10 +306,10 @@ def prepare_spectra(styrene_spectrum_path, polystyrene_spectrum_path, range_star
         return num_styrene.values[0][range_start:range_end], num_polystyrene.values[0][range_start:range_end]
 
     except FileNotFoundError as e:
-        print(f"Error: File not found. {e}")
+        log_msg(f"Error: File not found. {e}")
         return None, None
     except Exception as e:
-        print(f"Error in preparing spectra: {e}")
+        log_msg(f"Error in preparing spectra: {e}")
         return None, None
 
 
@@ -321,7 +329,7 @@ def fit_spectra(sample_spectrum, styrene_spectrum, polystyrene_spectrum,
     try:
         return deconvolution_method(sample_spectrum, styrene_spectrum, polystyrene_spectrum)
     except Exception as e:
-        print(f"Error during spectrum fitting: {e}")
+        log_msg(f"Error during spectrum fitting: {e}")
         return None
 
 
@@ -428,9 +436,9 @@ def linear_regression(x_train, y_train, x_test, y_test):
     regr.fit(x_train, y_train)
     y_pred = regr.predict(x_test)
 
-    print(f"Equation: y = {regr.coef_[0]:.4f}x + {regr.intercept_:.4f}")
-    print(f"Mean squared error: {mean_squared_error(y_test, y_pred):.4f}")
-    print(f"R^2: {r2_score(y_test, y_pred):.4f}")
+    log_msg(f"Equation: y = {regr.coef_[0]:.4f}x + {regr.intercept_:.4f}")
+    log_msg(f"Mean squared error: {mean_squared_error(y_test, y_pred):.4f}")
+    log_msg(f"R^2: {r2_score(y_test, y_pred):.4f}")
 
     return regr, y_pred
 
@@ -525,7 +533,7 @@ def spectra_pca(df: pd.DataFrame, num_components: int, volumes: np.ndarray, plot
 
         # Plot the loading of PC1 (contribution of each wavelength to PC1)
         plt.figure()
-        plt.plot(np.arange(data.shape[1]) + 220, pca_components[0])
+        plt.plot(np.arange(df.shape[1]) + 220, pca_components[0])
         plt.xlabel('Wavelength Index')
         plt.ylabel('Loading on PC1')
         plt.title('PC1 Loading: Wavelength Contributions')
@@ -624,10 +632,10 @@ def curve_fitting_lin_reg():
     #              "Predicted Spectral Fraction vs Actual Concentration of Polystyrene",
     #              "Polystyrene Concentration (mg/mL)")
 
-    print(f"Mean squared error: {mean_squared_error(styrene_components_actual, styrene_concs_pred):.4f}")
-    print(f"R^2: {r2_score(styrene_components_actual, styrene_concs_pred):.4f}")
-    print(f"Mean squared error: {mean_squared_error(ps_components_actual, ps_concs_pred):.4f}")
-    print(f"R^2: {r2_score(ps_components_actual, ps_concs_pred):.4f}")
+    log_msg(f"Mean squared error: {mean_squared_error(styrene_components_actual, styrene_concs_pred):.4f}")
+    log_msg(f"R^2: {r2_score(styrene_components_actual, styrene_concs_pred):.4f}")
+    log_msg(f"Mean squared error: {mean_squared_error(ps_components_actual, ps_concs_pred):.4f}")
+    log_msg(f"R^2: {r2_score(ps_components_actual, ps_concs_pred):.4f}")
 
     crude = load_data_new(
         r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\crude df 80.csv")
@@ -641,31 +649,26 @@ def curve_fitting_lin_reg():
     styrene_concs_pred = regr_styrene.predict(np.array(styrene_components_pred).reshape(-1, 1))
     ps_concs_pred = regr_polystyrene.predict(np.array(ps_components_pred).reshape(-1, 1))
 
-    print(styrene_concs_pred)
-    print(ps_concs_pred)
-    print(styrene_concs_pred / ps_concs_pred)
+    log_msg(styrene_concs_pred)
+    log_msg(ps_concs_pred)
+    log_msg(styrene_concs_pred / ps_concs_pred)
 
 
 @timeit
-def ml_screening():
-    # Paths
-    plate_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Plate 2a.csv"
-    data_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\240919_1305.csv"
-    styrene_spectrum_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Styrene & PS Cuvette Specs\PRD Plate Reader Specs\styrene 0.025 mgmL.csv"
-    polystyrene_spectrum_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Styrene & PS Cuvette Specs\PRD Plate Reader Specs\polystyrene 0.250 mgmL.csv"
-    volumes_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Volumes 18-Sep Duplicated.csv"
-    out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Test Folders\02-Oct-2024 expanded script figures"
+def ml_screening(plate_path, data_path, volumes_df, out_path):
 
-    # Load data
+    # Correct data
     data_corrected = separate_subtract_and_recombine(load_data_new(data_path), load_data_new(plate_path))
-    styrene_spectrum, polystyrene_spectrum = prepare_spectra(styrene_spectrum_path, polystyrene_spectrum_path, 40, 101)
-    volumes = load_data(volumes_path)
 
+    # Load in volumes
+    volumes = volumes_df
     volumes_abs = pd.concat([volumes, data_corrected.iloc[:, 1:]], axis=1).to_numpy()
 
+    # Correct from volume to concentration
     volumes_abs[:, 0] *= 0.025 / 300
     volumes_abs[:, 1] *= 0.25 / 300
 
+    # Define range of wavelengths to search
     start_index = 40
     end_index = 101
 
@@ -689,28 +692,59 @@ def ml_screening():
     }
 
     # List of model names and predicted values
-    model_names = []
-    y_preds = []
+    # model_names = []
+    # y_preds = []
+
+    # List to store the metrics for each model
+    metrics = {
+        'Model': [],
+        'R² Styrene': [],
+        'MSE Styrene': [],
+        'R² Polystyrene': [],
+        'MSE Polystyrene': []
+    }
 
     # Train models and store predictions
     for name, model in models.items():
         model.fit(X_train_scaled, y_train)
         y_pred = model.predict(X_test_scaled)
-        model_names.append(name)
-        y_preds.append(y_pred)
+        # model_names.append(name)
+        # y_preds.append(y_pred)
 
-    # Create subplots: one row for each model, two columns for styrene and polystyrene
-    fig, axes = plt.subplots(len(models), 2, figsize=(12, 4 * len(models)))
-    fig.suptitle('Model Predictions vs Actual Concentrations', fontsize=16)
-
-    # Plot each model's predictions and add R² and MSE values
-    for i, (name, y_pred) in enumerate(zip(model_names, y_preds)):
         # Calculate metrics for Styrene and Polystyrene
         r2_styrene = r2_score(y_test[:, 0], y_pred[:, 0])
         mse_styrene = mean_squared_error(y_test[:, 0], y_pred[:, 0])
 
         r2_polystyrene = r2_score(y_test[:, 1], y_pred[:, 1])
         mse_polystyrene = mean_squared_error(y_test[:, 1], y_pred[:, 1])
+
+        log_msg(
+            f"Model: {name} - R^2 = {r2_styrene: .4f}/{r2_polystyrene: .4f} - MSE: {mse_styrene: .4f}/{mse_polystyrene: .4f}")
+
+        # Append metrics to the dictionary
+        metrics['Model'].append(name)
+        metrics['R² Styrene'].append(r2_styrene)
+        metrics['MSE Styrene'].append(mse_styrene)
+        metrics['R² Polystyrene'].append(r2_polystyrene)
+        metrics['MSE Polystyrene'].append(mse_polystyrene)
+
+    # Create subplots: one row for each model, two columns for styrene and polystyrene
+    fig, axes = plt.subplots(len(models), 2, figsize=(12, 4 * len(models)))
+    fig.suptitle('Model Predictions vs Actual Concentrations', fontsize=16)
+
+    # Plot each model's predictions and add R² and MSE values
+    for i, (name, y_pred) in enumerate(models.items()):
+        # # Calculate metrics for Styrene and Polystyrene
+        # r2_styrene = r2_score(y_test[:, 0], y_pred[:, 0])
+        # mse_styrene = mean_squared_error(y_test[:, 0], y_pred[:, 0])
+        #
+        # r2_polystyrene = r2_score(y_test[:, 1], y_pred[:, 1])
+        # mse_polystyrene = mean_squared_error(y_test[:, 1], y_pred[:, 1])
+        #
+        # log_msg(
+        #     f"Model: {name} - R^2 = {r2_styrene: .4f}/{r2_polystyrene: .4f} - MSE: {mse_styrene: .4f}/{mse_polystyrene: .4f}")
+
+        y_pred = model.predict(X_test_scaled)
 
         # Styrene (first column of y)
         axes[i, 0].scatter(y_test[:, 0], y_pred[:, 0], alpha=0.7)
@@ -720,7 +754,7 @@ def ml_screening():
         axes[i, 0].set_title(f'{name} - Styrene')
 
         # Add R² and MSE as text annotations
-        axes[i, 0].text(0.05, 0.9, f'R² = {r2_styrene:.4f}\nMSE = {mse_styrene:.4f}',
+        axes[i, 0].text(0.05, 0.9, f'R² = {r2_styrene: .4f}\nMSE = {mse_styrene: .4f}',
                         transform=axes[i, 0].transAxes, fontsize=10, verticalalignment='top',
                         bbox=dict(facecolor='white', alpha=0.5))
 
@@ -737,50 +771,58 @@ def ml_screening():
                         bbox=dict(facecolor='white', alpha=0.5))
 
     # Adjust layout
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
-    # plt.savefig(
-    #     r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Test Folders\model screening concs restrict domain.png")
+    plt.tight_layout(rect=(0, 0, 1, 0.96))
+    plt.savefig(
+        out_path + r"\model screening concs restrict domain please dont be broken.png")
 
-    # Paths
-    plate_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\23-Sep-2024\plate 2c.csv"
-    data_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\23-Sep-2024\240923_1512.csv"
-    volumes_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\23-Sep-2024\Volumes No Solvent 23-Sep Duplicated.csv"
-    out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Test Folders\02-Oct-2024 expanded script figures"
+    # Convert the metrics dictionary to a DataFrame for easy manipulation
+    metrics_df = pd.DataFrame(metrics)
 
-    # Load data
+    # End training #
+
+    return models, metrics_df, scaler
+
+
+def verify_models(plate_path, data_path, volumes_df, out_path, models, scaler):
+    # Begin verification #
+
+    # Load new data for verification
     data_corrected = separate_subtract_and_recombine(load_data_new(data_path), load_data_new(plate_path))
-    volumes = load_data(volumes_path)
+    volumes = volumes_df
 
     volumes_abs = pd.concat([volumes, data_corrected.iloc[:, 1:]], axis=1).to_numpy()
 
     volumes_abs[:, 0] *= 0.025 / 300
     volumes_abs[:, 1] *= 0.25 / 300
 
+    # Define range of wavelengths to search
+    start_index = 40
+    end_index = 101
+
     # Extract features (absorbance spectra) and targets (concentrations)
     X = volumes_abs[:, start_index:end_index]  # Absorbance spectra
     y_test = volumes_abs[:, :2]  # Concentrations of styrene and polystyrene
+
+    # Normalize the features
+    X_scaled_new = scaler.transform(X)  # Use the previously fitted scaler
+
+    # Initialize a list to store the predicted results for analysis
     y_pred_new = []
 
     # Store predictions from models on new data
     for name, model in models.items():
-        # Predict on new data (make sure to use the same scaler as before)
-        X_scaled_new = scaler.transform(X)  # Use the previously fitted scaler
-
         # Get predictions on the new data
         y_pred = model.predict(X_scaled_new)
 
         # Store the predictions for analysis
         y_pred_new.append(y_pred)
 
-        # Check for shape consistency between predicted and actual
-        print(f"Model: {name} - y_test shape: {y_test.shape}, y_pred shape: {y_pred.shape}")
-
     # Create subplots for the new dataset validation
     fig, axes = plt.subplots(len(models), 2, figsize=(12, 4 * len(models)))
     fig.suptitle('Model Predictions vs Actual Concentrations (Validation)', fontsize=16)
 
     # Plot the predictions vs actual values
-    for i, (name, y_pred) in enumerate(zip(model_names, y_pred_new)):
+    for i, (name, y_pred) in enumerate(zip(models.keys(), y_pred_new)):
         # Calculate metrics for Styrene and Polystyrene on new data
         r2_styrene = r2_score(y_test[:, 0], y_pred[:, 0])
         mse_styrene = mean_squared_error(y_test[:, 0], y_pred[:, 0])
@@ -814,39 +856,9 @@ def ml_screening():
 
     # Adjust layout and save the figure
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-    # plt.savefig(
-    #     r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Test Folders\model screening concs restrict domain validated.png")
-
-    crude = load_data_new(
-        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\crude df 80.csv").to_numpy()[
-            :, 1:]
-
-    for name, model in models.items():
-        # Predict on new data (make sure to use the same scaler as before)
-        X_scaled_new = scaler.transform(crude[:, start_index:end_index])  # Use the previously fitted scaler
-
-        # Get predictions on the new data
-        y_pred = model.predict(X_scaled_new)
-
-        styrene = float(y_pred[:, 0])
-        ps = float(y_pred[:, 1])
-
-        # Print expected S/PS values
-        print(
-            f"Model: {name} - Predicted Conc Styrene: {styrene: .6f}, Predicted Conc PS: {ps: .6f}, Ratio: {styrene / ps: .4f}")
+    plt.savefig(out_path + r"\model_screening_concs_validation.png")
 
 
 if __name__ == "__main__":
-    # Load data
-    plate = load_data_new(
-        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Plate 2a.csv")
-    data = load_data_new(
-        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\240919_1305.csv")
-    out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Test Folders\02-Oct-2024 expanded script figures"
-    volumes = load_data(
-        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Volumes 18-Sep Duplicated.csv").to_numpy()
-
-    data = separate_subtract_and_recombine(data, plate).iloc[:, 1:]
-
-    x, y, z = spectra_pca(data, 3, volumes, plot_data=False, x_bounds=(220, 400),
-                          out_path=current_directory + r"\image.png")
+    pass
+    # Load data and call functions here
