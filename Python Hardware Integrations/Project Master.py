@@ -1099,8 +1099,20 @@ def conc_model(conn, user_name: str = "Lachlan"):
 
         volumes_df, volumes_path = gen_volumes_csv()  # Generate volumes for first experiment
 
-        log_msg("Uploading volumes CSV to OT-2")
-        run_subprocess(volumes_path)  # Upload dupe volume CSV to OT-2 at data/user_storage/protocols/Duplicated_Volumes
+        # Upload duplicated volumes CSV to OT-2 with retry logic to handle connection errors
+        upload_success = False
+        while not upload_success:
+            try:
+                log_msg("Uploading protocol to OT-2")
+                run_subprocess(volumes_path)
+                log_msg("Upload complete")
+                upload_success = True
+            except Exception as e:
+                log_msg(f"Error uploading protocol: {e}")
+                user_input = input(">>> Retry upload? (yes/no): \n>>> ")
+                if user_input.lower() != "yes":
+                    log_msg("Upload cancelled by user")
+                    break
 
         # # Remove this block once auto protocol gen has been sorted
         # while True:
@@ -1111,10 +1123,21 @@ def conc_model(conn, user_name: str = "Lachlan"):
         #         log_msg("Waiting for protocol preparation...")
 
         # Upload updated script to OT-2
-        log_msg("Uploading protocol to OT-2")
         # run_subprocess(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Honours Python Main\OT-2 Protocols\DoE + Monomers Experiment\Mixtures Expt - SSH.py")
-        run_subprocess(protocol_path)
-        log_msg("Upload complete")
+
+        upload_success = False
+        while not upload_success:
+            try:
+                log_msg("Uploading protocol to OT-2")
+                run_subprocess(protocol_path)
+                log_msg("Upload complete")
+                upload_success = True
+            except Exception as e:
+                log_msg(f"Error uploading protocol: {e}")
+                user_input = input(">>> Retry upload? (yes/no): \n>>> ")
+                if user_input.lower() != "yes":
+                    log_msg("Upload cancelled by user")
+                    break
 
         # Make robot prepare samples
         log_msg("Please allow robot to prepare samples before proceeding")
