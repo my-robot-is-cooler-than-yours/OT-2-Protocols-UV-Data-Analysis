@@ -24,6 +24,7 @@ import paramiko
 import subprocess
 from tkinter import Tk
 from tkinter import filedialog
+import json
 
 # Set plotting parameters globally
 mpl.rcParams.update({'font.size': 12})
@@ -1043,23 +1044,34 @@ def run_ssh_command(protocol_name):
     return complete
 
 
-def conc_model(conn):
+def conc_model(conn, user_name: str = "Lachlan"):
     """
     For use in handle_client() function. Takes background & sample CSVs & generates ML model from corrected data.
 
     :param conn: Socket object to facilitate connection to 32-bit client.
+    :param user_name: Name of the user running the experiment, obtained when handle_client() is run.
     :return:
     """
+    start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
     # Define paths for output data and protocol to be uploaded
     # out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\22-Oct Almost Full Auto w. Offsets"
+    log_msg("Select path for data output:")
     out_path = get_output_path()
 
     # protocol_name = "Mixtures Expt - SSH"
+    log_msg("Select path for protocol upload:")
     protocol_path = get_output_path()
     protocol_name = protocol_path.split("/")[-1]
 
     verification = False
+
+    # Dictionary for experiment metadata
+    experiment_metadata = {
+        "user": user_name,
+        "start_time": start_time,
+        "output_path": out_path
+    }
 
     while True:
         # Ask plate reader to take blank reading of plate. Wait for user confirmation to proceed
@@ -1185,6 +1197,16 @@ def conc_model(conn):
             verification = False  # this should break loop
             break
 
+    end_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    experiment_metadata["end_time"] = end_time
+    log_msg(f"Experiment ended at {end_time}")
+
+    # Save experiment metadata
+    with open(os.path.join(out_path, 'experiment_metadata.json'), 'w') as f:
+        json.dump(experiment_metadata, f, indent=4)
+
+    log_msg("Metadata saved")
+
 
 @timeit
 def handle_client(conn):
@@ -1192,12 +1214,13 @@ def handle_client(conn):
     :param conn: socket.socket object, connection to client socket.
     """
     try:
-        while True:
+        user_name = input(">>> Enter your name: \n>>> ")
 
+        while True:
             choice = input(">>> Enter workflow number: \n1. Conc Model \n2. Shutdown \n>>> ")
 
             if choice == "1":
-                conc_model(conn)
+                conc_model(conn, user_name)
 
             if choice == "2":
                 send_message(conn, "SHUTDOWN")
