@@ -961,11 +961,11 @@ def run_subprocess(protocol_path):
     # Run the command using subprocess
     try:
         result = subprocess.run(scp_command, check=True, text=True, capture_output=True)
-        print("File transferred successfully!")
+        log_msg("File transferred successfully!")
 
     except subprocess.CalledProcessError as e:
-        print(f"An error occurred: {e}")
-        print(f"Error output: {e.stderr}")
+        log_msg(f"An error occurred: {e}")
+        log_msg(f"Error output: {e.stderr}")
 
 
 def run_ssh_command(protocol_name):
@@ -1007,14 +1007,14 @@ def run_ssh_command(protocol_name):
             line = stdout.readline()  # Read each line as it's received
             if not line:  # Break the loop when there's no more output
                 break
-            print(line, end='')  # Print the output line by line without extra newlines
+            log_msg(line, end='')  # log_msg the output line by line without extra newlines
 
             # Store the line in the full output list
             full_output.append(line)
 
             # Check for "Protocol Finished" in the real-time output
             if "Protocol Finished" in line:
-                print("Protocol end detected")
+                log_msg("Protocol end detected")
                 complete = True
                 break
 
@@ -1024,17 +1024,17 @@ def run_ssh_command(protocol_name):
         # Read the output from stdout
         output = ''.join(stdout.readlines())
 
-        print(full_output)  # Optionally still print the entire output for debugging or completion detection
+        log_msg(full_output)  # Optionally still log_msg the entire output for debugging or completion detection
 
         # Check for the phrase "Protocol Finished"
         if ' Protocol Finished\n' in full_output:
-            print("Protocol end detected")
+            log_msg("Protocol end detected")
 
         else:
-            print("Protocol end not detected")
+            log_msg("Protocol end not detected")
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        log_msg(f"An error occurred: {e}")
 
     finally:
         # Close the SSH connection
@@ -1231,6 +1231,173 @@ def conc_model(conn, user_name: str = "Lachlan"):
     log_msg("Metadata saved")
 
 
+def conc_model_for_testing(conn, user_name: str = "Lachlan"):
+    """
+    For use in handle_client() function. Takes background & sample CSVs & generates ML model from corrected data.
+
+    :param conn: Socket object to facilitate connection to 32-bit client.
+    :param user_name: Name of the user running the experiment, obtained when handle_client() is run.
+    :return:
+    """
+    start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
+    # Define paths for output data and protocol to be uploaded
+    log_msg("Select path for data output:")
+    out_path = get_output_path()
+
+    # protocol_name = "Mixtures Expt - SSH"
+    log_msg("Select path for protocol upload:")
+    protocol_path = get_output_path()
+    protocol_name = protocol_path.split("/")[-1]
+
+    verification = False
+
+    # Dictionary for experiment metadata
+    experiment_metadata = {
+        "user": user_name,
+        "start_time": start_time,
+        "output_path": out_path
+    }
+
+    while True:
+        # Ask plate reader to take blank reading of plate. Wait for user confirmation to proceed
+        log_msg("Plate background is required to be taken before proceeding")
+
+        while True:
+            user_input = input(">>> Has empty plate been prepared and ready to be inserted? (yes/no): \n>>> ")
+            if user_input.lower() == "yes":
+                break
+            else:
+                log_msg("Waiting for plate preparation...")
+
+        log_msg("Requesting plate background from reader")
+        send_message(conn, "PLATE_BACKGROUND", "Empty Plate Reading")
+
+        log_msg("Awaiting message from client")
+        msg_type, msg_data = receive_message(conn)
+
+        if msg_type == "PLATE_BACKGROUND":
+            log_msg("Plate background data received")
+
+            # Save plate bg to variable
+            plate_background_path = msg_data
+            log_msg("Plate background path saved")
+
+        volumes_df, volumes_path = gen_volumes_csv()  # Generate volumes for first experiment
+
+        # Upload duplicated volumes CSV to OT-2 with retry logic to handle connection errors
+        upload_success = False
+        while not upload_success:
+            try:
+                log_msg("Uploading volumes data to OT-2")
+                # run_subprocess(volumes_path)
+                log_msg("Upload complete")
+                upload_success = True
+            except Exception as e:
+                log_msg(f"Error uploading protocol: {e}")
+                user_input = input(">>> Retry upload? (yes/no): \n>>> ")
+                if user_input.lower() != "yes":
+                    log_msg("Upload cancelled by user")
+                    break
+
+        upload_success = False
+        while not upload_success:
+            try:
+                log_msg("Uploading protocol to OT-2")
+                # run_subprocess(protocol_path)
+                log_msg("Upload complete")
+                upload_success = True
+            except Exception as e:
+                log_msg(f"Error uploading protocol: {e}")
+                user_input = input(">>> Retry upload? (yes/no): \n>>> ")
+                if user_input.lower() != "yes":
+                    log_msg("Upload cancelled by user")
+                    break
+
+        # Make robot prepare samples
+        log_msg("Please allow robot to prepare samples before proceeding")
+
+        # SSH into OT-2 and run opentrons_execute command
+        log_msg(f"SSh'ing into OT-2 and running opentrons_execute command on protocol {protocol_name}")
+        # output = run_ssh_command(protocol_name)
+        output = True
+
+        # Wait for robot confirmation that run is complete
+        while True:
+            # Check for the phrase "Protocol Finished" in shell output
+            if output:
+                log_msg("OT-2 protocol finished, proceeding")
+                break
+
+            else:
+                log_msg("OT-2 either not finished protocol or error has occurred")
+                user_input = input(">>> Proceed manually? \n>>> ")
+                if user_input.lower() == "yes":
+                    break
+                else:
+                    pass
+
+        log_msg("Requesting to run measurement protocol")
+        send_message(conn, "RUN_PROTOCOL", "Empty Plate Reading")
+
+        log_msg("Awaiting message from client")
+        msg_type, msg_data = receive_message(conn)
+
+        if msg_type == "CSV_FILE":
+            if verification is False:
+                log_msg(f"Measurement complete")
+                log_msg(f"Received CSV file with path: {msg_data}")
+
+                data_path = msg_data
+                log_msg("Data path saved")
+
+                # Run machine learning screening
+                log_msg("Doing ML stuff")
+                models, metrics, scaler = ml_screening(plate_background_path, data_path, volumes_df, out_path)
+
+                log_msg(f"\n{metrics}")
+
+            elif verification is True:
+                log_msg("!!!Verification Step!!!")
+                log_msg(f"Measurement complete")
+                log_msg(f"Received CSV file with path: {msg_data}")
+
+                data_path = msg_data
+                log_msg("Data path saved")
+
+                # Run machine learning screening
+                log_msg("Doing ML stuff")
+                verify_models(plate_background_path, data_path, volumes_df, out_path, models, scaler)
+                log_msg("Verification step complete")
+
+                break  # should break from outer loop
+
+        # Test certain conditions being met after analysis completed
+        # test = input(">>> Condition met? \n>>> ")  # Imagine this is some condition being met from the ML quality parameters
+        test = "yes"
+
+        if test.lower() == "yes":
+            pass
+            verification = True
+            log_msg("Decision - verification requested")
+            # loop repeats to take set of verification samples
+
+        else:
+            # send_message(conn, "ANALYSIS_COMPLETE")
+            verification = False  # this should break loop
+            break
+
+    end_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    experiment_metadata["end_time"] = end_time
+    log_msg(f"Experiment ended at {end_time}")
+
+    # Save experiment metadata
+    with open(os.path.join(out_path, 'experiment_metadata.json'), 'w') as f:
+        json.dump(experiment_metadata, f, indent=4)
+
+    log_msg("Metadata saved")
+
+
 @timeit
 def handle_client(conn):
     """Handle multiple messages from the client.
@@ -1240,12 +1407,15 @@ def handle_client(conn):
         user_name = input(">>> Enter your name: \n>>> ")
 
         while True:
-            choice = input(">>> Enter workflow number: \n1. Conc Model \n2. Shutdown \n>>> ")
+            choice = input(">>> Enter workflow number: \n1. Conc Model \n2. Test Conc Model \n3. Shutdown \n>>> ")
 
             if choice == "1":
                 conc_model(conn, user_name)
 
             if choice == "2":
+                conc_model_for_testing(conn, user_name)
+
+            if choice == "3":
                 send_message(conn, "SHUTDOWN")
                 break
 
@@ -1278,7 +1448,6 @@ def server_main():
 
 
 if __name__ == "__main__":
-    # gen_volumes_csv()
     server_main()
 
     # # Load data
