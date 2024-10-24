@@ -1,6 +1,8 @@
 import paramiko
 import subprocess
 import time
+from tkinter import Tk
+from tkinter import filedialog
 
 
 def run_ssh_command_deprecated():
@@ -98,7 +100,8 @@ def run_ssh_command(protocol_name):
         hostname = "169.254.80.171"  # Replace with your OT-2's IP address
         username = "root"  # OT-2 default username is 'root'
         key_path = r"C:\Users\Lachlan Alexander\ot2_ssh_key"  # Path to your SSH private key
-        protocol_path = f"'/data/user_storage/prd_protocols/{protocol_name}.py'"  # Path to your protocol on the OT-2
+        # protocol_path = f"'/data/user_storage/prd_protocols/{protocol_name}.py'"  # Path to your protocol on the OT-2
+        protocol_path = f"'/data/user_storage/prd_protocols/{protocol_name}'"  # Path to your protocol on the OT-2
 
         # If using a passphrase with your SSH key
         key_passphrase = ""  # Replace with your SSH key passphrase or None if no passphrase
@@ -156,8 +159,13 @@ def run_ssh_command(protocol_name):
 
 
 if __name__ == "__main__":
+    filepath = filedialog.askdirectory(title="Select Output Folder")
+    file_name = filepath.split("/")[-1]
+
     # First, transfer the protocol file to the OT-2 using SCP
-    run_subprocess(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Honours Python Main\OT-2 Protocols\DoE + Monomers Experiment\Mixtures Expt - SSH.py")
+    # run_subprocess(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Honours Python Main\OT-2 Protocols\DoE + Monomers Experiment\Mixtures Expt - SSH.py")
+    run_subprocess(file_name)
 
     # Then, execute the protocol via SSH
-    run_ssh_command("Mixtures Expt - SSH")
+    # run_ssh_command("Mixtures Expt - SSH")
+    run_ssh_command(file_name)

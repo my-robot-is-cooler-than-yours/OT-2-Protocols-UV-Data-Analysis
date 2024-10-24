@@ -41,7 +41,10 @@ def run(protocol: protocol_api.ProtocolContext):
     r_tipracks = [protocol.load_labware(R_PIP_TIPRACK_LOADNAME, slot) for slot in R_PIP_TIPRACK_SLOTS]
     l_tipracks = [protocol.load_labware(L_PIP_TIPRACK_LOADNAME, slot) for slot in L_PIP_TIPRACK_SLOTS]
     reservoirs = [protocol.load_labware(RESERVOIR_LOADNAME, slot) for slot in RESERVOIR_SLOTS]
-    well_plates = [protocol.load_labware(WELL_PLATE_LOADNAME, slot) for slot in WELL_PLATE_SLOTS]
+    # well_plates = [protocol.load_labware(WELL_PLATE_LOADNAME, slot) for slot in WELL_PLATE_SLOTS]
+    well_plates = [protocol.load_labware("laindustries_slot_4_40_wellplate_400ul", 4),
+                   protocol.load_labware("laindustries_slot_7_40_wellplate_400ul", 7)
+                   ]
 
     # Load pipettes
     right_pipette = protocol.load_instrument("p1000_single_gen2", "right", tip_racks=r_tipracks)
@@ -50,6 +53,7 @@ def run(protocol: protocol_api.ProtocolContext):
     # Pick up, move, and put down at various labware to get offsets
     left_pipette.pick_up_tip()
     left_pipette.move_to(well_plates[0].wells()[0].top())
+    left_pipette.move_to(well_plates[1].wells()[0].top())
     left_pipette.move_to(reservoirs[0].wells()[0].top())
     left_pipette.return_tip()
 

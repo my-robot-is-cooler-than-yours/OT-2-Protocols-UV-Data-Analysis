@@ -20,6 +20,10 @@ from sklearn.decomposition import PCA
 import socket
 import pyDOE2
 import sys
+import paramiko
+import subprocess
+from tkinter import Tk
+from tkinter import filedialog
 
 # Set plotting parameters globally
 mpl.rcParams.update({'font.size': 12})
@@ -45,6 +49,27 @@ def log_msg(message):
     """Log a message with a timestamp."""
     current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     print(f"[{current_time}] {message}")
+
+
+def get_output_path():
+    """
+    Prompt the user to select an output folder or create a new folder to save experiment results.
+
+    :return: Full path of the selected or created folder.
+    """
+    root = Tk()
+    root.withdraw()  # Hide the main Tkinter window
+
+    while True:
+        # Prompt the user to select a folder
+        output_path = filedialog.askdirectory(title="Select Output Folder")
+
+        if not output_path:
+            log_msg("No folder selected, please select a folder or file.")
+        else:
+            break
+
+    return output_path
 
 
 def timeit(func):
@@ -78,6 +103,59 @@ def load_data(path_input: str) -> pd.DataFrame:
     except Exception as e:
         log_msg(f"Error loading file: {e}")
     return pd.DataFrame()  # Return an empty DataFrame on failure
+
+
+def generate_lhs_design(num_samples=46, total_volume=300, step_size=20, num_factors=2):
+    # Generate LHS design
+    lhs = pyDOE2.lhs(num_factors, samples=num_samples)
+
+    # Scale LHS design to the volume constraints
+    scaled_lhs = lhs * (total_volume / num_factors)
+
+    # Round to the nearest step_size and ensure minimum volume constraint
+    scaled_lhs = np.round(scaled_lhs / step_size, 2) * step_size
+    scaled_lhs = np.clip(scaled_lhs, step_size, None)
+
+    # Calculate the third column (solvent) as 300 minus the sum of the first two columns
+    solvent_volumes = total_volume - np.sum(scaled_lhs, axis=1)
+
+    # Combine the first two columns with the new solvent column
+    scaled_lhs = np.column_stack((scaled_lhs, solvent_volumes))
+
+    return scaled_lhs
+
+
+def gen_volumes_csv():
+    # Define constants
+    num_samples = 46  # the number of unique samples to be measured
+    total_volume = 300  # final volume in each well
+    step_size = 20  # minimum step size
+    num_factors = 2  # number of variables (styrene, polystyrene)
+
+    # Generate and verify the LHS design
+    while True:
+        scaled_lhs = generate_lhs_design(num_samples, total_volume, step_size, num_factors)
+        if np.all(np.sum(scaled_lhs, axis=1) == total_volume) and len(np.unique(scaled_lhs, axis=0)) == num_samples:
+            log_msg("VERIFIED: All samples are unique and sum to 300 uL.")
+            break
+        log_msg("ERROR: Some samples are not unique or do not sum to 300 uL. Retrying...")
+
+    # Create DataFrame and save to CSV
+    volumes = pd.DataFrame(scaled_lhs, columns=['Styrene (uL)', 'Polystyrene (uL)', 'Solvent (uL)'])
+    current_time = time.strftime("%Y-%m-%d %H_%M_%S", time.localtime())
+    out_path = rf"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\Volumes.csv"
+    volumes.to_csv(out_path, index=False)
+
+    # Prepare duplicated volumes and additional solvent rows
+    processed_lhs = np.repeat(scaled_lhs, 2, axis=0)
+    new_rows = pd.DataFrame([[0, 0, 300]] * 4, columns=['Styrene (uL)', 'Polystyrene (uL)', 'Solvent (uL)'])
+    duplicated_volumes = pd.concat([new_rows, pd.DataFrame(processed_lhs, columns=volumes.columns)], ignore_index=True)
+    duplicated_out_path = out_path.replace("Volumes", "Duplicated_Volumes")
+    duplicated_volumes.to_csv(duplicated_out_path, index=False)
+
+    log_msg("\n" + duplicated_volumes.round(2).to_csv(index=False))
+
+    return duplicated_volumes, duplicated_out_path
 
 
 def load_data_new(path: str, start_wavelength: int = 220, end_wavelength: int = 1000) -> pd.DataFrame:
@@ -160,7 +238,6 @@ def separate_subtract_and_recombine(raw_df: pd.DataFrame, plate_data: pd.DataFra
     return final_plate
 
 
-# Function to plot a heatmap from a DataFrame
 def plot_heatmap(df, value_col, title, ax, cmap='coolwarm', annot=True, fmt=".3f", cbar=True) -> None:
     """
     Plot a heatmap from a DataFrame.
@@ -191,7 +268,6 @@ def plot_heatmap(df, value_col, title, ax, cmap='coolwarm', annot=True, fmt=".3f
         log_msg(f"An error occurred while plotting the heatmap: {e}")
 
 
-# Function to plot absorbance spectra
 def plot_line(df, x_col_start, x_col_end, ax, title="Absorbance Spectra", samples_start=0, samples_end=1,
               wavelength_range=(220, 1000), ylim: tuple = False, legend=True) -> None:
     """
@@ -241,7 +317,6 @@ def plot_line(df, x_col_start, x_col_end, ax, title="Absorbance Spectra", sample
         log_msg(f"An error occurred while plotting the spectra: {e}")
 
 
-# Least squares deconvolution function using minimize
 def least_squares_deconvolution(sample_spectrum, styrene_spectrum, polystyrene_spectrum) -> tuple:
     """
     Perform least-squares deconvolution to find the best coefficients
@@ -262,7 +337,6 @@ def least_squares_deconvolution(sample_spectrum, styrene_spectrum, polystyrene_s
     return result.x
 
 
-# Scipy curve fitting function
 def scipy_curve_fit(sample_spectrum, styrene_spectrum, polystyrene_spectrum):
     """
     Perform curve fitting using scipy's curve_fit function.
@@ -285,7 +359,6 @@ def scipy_curve_fit(sample_spectrum, styrene_spectrum, polystyrene_spectrum):
         return None
 
 
-# Function to prepare component spectra from files
 def prepare_spectra(styrene_spectrum_path, polystyrene_spectrum_path, range_start=0, range_end=None):
     """
     Load and prepare styrene and polystyrene spectra from files, selecting a wavelength range.
@@ -313,7 +386,6 @@ def prepare_spectra(styrene_spectrum_path, polystyrene_spectrum_path, range_star
         return None, None
 
 
-# Function to fit spectra using a selected deconvolution method
 def fit_spectra(sample_spectrum, styrene_spectrum, polystyrene_spectrum,
                 deconvolution_method=least_squares_deconvolution):
     """
@@ -333,7 +405,6 @@ def fit_spectra(sample_spectrum, styrene_spectrum, polystyrene_spectrum,
         return None
 
 
-# Function to calculate R-squared
 def calculate_r_squared(sample_spectrum, fitted_spectrum):
     """
     Calculate the R-squared value between the observed sample spectrum and the fitted spectrum.
@@ -488,7 +559,6 @@ def plot_results(x_test, y_test, y_pred, regr, output_path, title, y_axis_label)
     plt.savefig(output_path)
 
 
-# Main function to orchestrate the workflow
 def spectra_pca(df: pd.DataFrame, num_components: int, volumes: np.ndarray, plot_data: bool = False,
                 x_bounds: tuple = False, out_path: str = current_directory):
     """
@@ -669,7 +739,7 @@ def ml_screening(plate_path, data_path, volumes_df, out_path):
 
     # Define range of wavelengths to search
     start_index = 40
-    end_index = 101
+    end_index = None
 
     # Extract features (absorbance spectra) and targets (concentrations)
     X = volumes_abs[:, start_index:end_index]  # Absorbance spectra
@@ -796,7 +866,7 @@ def verify_models(plate_path, data_path, volumes_df, out_path, models, scaler):
 
     # Define range of wavelengths to search
     start_index = 40
-    end_index = 101
+    end_index = None
 
     # Extract features (absorbance spectra) and targets (concentrations)
     X = volumes_abs[:, start_index:end_index]  # Absorbance spectra
@@ -855,7 +925,7 @@ def verify_models(plate_path, data_path, volumes_df, out_path, models, scaler):
 
     # Adjust layout and save the figure
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig(out_path + "\model_screening_concs_validation.png")
+    plt.savefig(out_path + r"\model_screening_concs_validation.png")
 
 
 def send_message(conn, message_type, message_data=""):
@@ -870,112 +940,129 @@ def receive_message(conn):
     return data.split("|", 1)
 
 
-def generate_lhs_design(num_samples=46, total_volume=300, step_size=20, num_factors=2):
-    # Generate LHS design
-    lhs = pyDOE2.lhs(num_factors, samples=num_samples)
+def run_subprocess(protocol_path):
+    """
+    Uses the subprocess module to transfer a protocol file to the OT-2 using legacy SCP (Secure Copy Protocol).
+    This function is useful for uploading files from your local machine to the OT-2 before executing the protocol.
 
-    # Scale LHS design to the volume constraints
-    scaled_lhs = lhs * (total_volume / num_factors)
+    :return: None
+    """
+    # Define the SCP command with the -O flag
+    scp_command = [
+        "scp",
+        "-i", r"C:\Users\Lachlan Alexander\ot2_ssh_key",  # Path to your SSH key
+        "-O",  # Force the legacy SCP protocol
+        rf"{protocol_path}",
+        # Local file path
+        "root@169.254.80.171:/data/user_storage/prd_protocols"  # Destination on OT-2
+    ]
 
-    # Round to the nearest step_size and ensure minimum volume constraint
-    scaled_lhs = np.round(scaled_lhs / step_size, 2) * step_size
-    scaled_lhs = np.clip(scaled_lhs, step_size, None)
+    # Run the command using subprocess
+    try:
+        result = subprocess.run(scp_command, check=True, text=True, capture_output=True)
+        print("File transferred successfully!")
 
-    # Calculate the third column (solvent) as 300 minus the sum of the first two columns
-    solvent_volumes = total_volume - np.sum(scaled_lhs, axis=1)
-
-    # Combine the first two columns with the new solvent column
-    scaled_lhs = np.column_stack((scaled_lhs, solvent_volumes))
-
-    return scaled_lhs
+    except subprocess.CalledProcessError as e:
+        print(f"An error occurred: {e}")
+        print(f"Error output: {e.stderr}")
 
 
-def gen_volumes_csv():
-    # Define constants
-    num_samples = 46  # the number of unique samples to be measured
-    total_volume = 300  # final volume in each well
-    step_size = 20  # minimum step size
-    num_factors = 2  # number of variables (styrene, polystyrene)
+def run_ssh_command(protocol_name):
+    """
+    Establish an SSH connection to the Opentrons OT-2 and execute a protocol via SSH.
+    This function uses Paramiko to communicate with the OT-2, executes the given protocol, and then
+    processes the output to check for the "Protocol Finished" message.
 
-    # Generate the LHS design
-    scaled_lhs = generate_lhs_design(num_samples, total_volume, step_size, num_factors)
+    :return: None
+    """
+    # Variable to determine if protocol finished
+    complete = False
 
-    # Verification cxheck that all rows sum to total_volume
-    volume_sums = np.sum(scaled_lhs, axis=1)
+    try:
+        # Replace these with your own details
+        hostname = "169.254.80.171"  # Replace with your OT-2's IP address
+        username = "root"  # OT-2 default username is 'root'
+        key_path = r"C:\Users\Lachlan Alexander\ot2_ssh_key"  # Path to your SSH private key
+        protocol_path = f"'/data/user_storage/prd_protocols/{protocol_name}'"  # Path to your protocol on the OT-2
 
-    while np.all(volume_sums != total_volume) or len(np.unique(scaled_lhs, axis=0)) != num_samples:
-        print("ERROR: Some samples are not unique or do not sum to 300 uL")
-        scaled_lhs = generate_lhs_design(num_samples, total_volume, step_size,
-                                         num_factors)  # regenerate the design if it doesn't pass checks
-        volume_sums = np.sum(scaled_lhs, axis=1)
+        # If using a passphrase with your SSH key
+        key_passphrase = ""  # Replace with your SSH key passphrase or None if no passphrase
 
-    # Check that all rows sum to total_volume
-    volume_sums = np.sum(scaled_lhs, axis=1)
-    if np.all(volume_sums == total_volume):
-        print("VERIFIED: All samples have a total volume of 300 units.")
-    else:
-        print("ERROR: Some samples do not sum to 300 units.")
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-    # Check that all rows are unique
-    if len(np.unique(scaled_lhs, axis=0)) == num_samples:
-        print("VERIFIED: All samples are unique.")
-    else:
-        print("ERROR: Some samples are not unique.")
+        # Load the private key
+        # private_key = paramiko.RSAKey.from_private_key_file(key_path, password=key_passphrase)
 
-    # Convert to a pandas DataFrame
-    volumes = pd.DataFrame(scaled_lhs, columns=['Styrene (µL)', 'Polystyrene (µL)', 'Solvent (µL)'])
+        ssh.connect(hostname, username=username, key_filename=key_path)
 
-    # Save to CSV
-    # Get current time to append to file name
-    current_time = time.strftime("%Y-%m-%d %H_%M_%S", time.localtime())
+        stdin, stdout, stderr = ssh.exec_command(f'sh -l -c "opentrons_execute {protocol_path}"')
 
-    out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing"
+        # List to store the entire output
+        full_output = []
 
-    volumes.to_csv(out_path + rf"\ {current_time} Volumes.csv", index=False)
+        # Real-time output processing versus all-in-one at the end
+        while True:
+            line = stdout.readline()  # Read each line as it's received
+            if not line:  # Break the loop when there's no more output
+                break
+            print(line, end='')  # Print the output line by line without extra newlines
 
-    solvent_volumes = scaled_lhs[:, 2]
-    solvent_volumes = np.repeat(solvent_volumes, 2)
+            # Store the line in the full output list
+            full_output.append(line)
 
-    styrene_volumes = scaled_lhs[:, 0]
-    styrene_volumes = np.repeat(styrene_volumes, 2)
+            # Check for "Protocol Finished" in the real-time output
+            if "Protocol Finished" in line:
+                print("Protocol end detected")
+                complete = True
+                break
 
-    polystyrene_volumes = scaled_lhs[:, 1]
-    polystyrene_volumes = np.repeat(polystyrene_volumes, 2)
+            # Small delay to avoid overloading the loop
+            time.sleep(0.1)
 
-    processed_lhs = np.column_stack((styrene_volumes, polystyrene_volumes, solvent_volumes))
+        # Read the output from stdout
+        output = ''.join(stdout.readlines())
 
-    # Convert to a pandas DataFrame
-    duplicated_volumes = pd.DataFrame(processed_lhs, columns=['Styrene (µL)', 'Polystyrene (µL)', 'Solvent (µL)'])
+        print(full_output)  # Optionally still print the entire output for debugging or completion detection
 
-    # New rows to add at the top
-    new_rows = pd.DataFrame([[0, 0, 300], [0, 0, 300], [0, 0, 300], [0, 0, 300]], columns=duplicated_volumes.columns)
+        # Check for the phrase "Protocol Finished"
+        if ' Protocol Finished\n' in full_output:
+            print("Protocol end detected")
 
-    # Concatenate new rows to the top of the existing DataFrame
-    duplicated_volumes = pd.concat([new_rows, duplicated_volumes], ignore_index=True)
+        else:
+            print("Protocol end not detected")
 
-    # Save to CSV
-    duplicated_volumes.to_csv(out_path + rf"\ {current_time} Duplicated Volumes.csv", index=False)
+    except Exception as e:
+        print(f"An error occurred: {e}")
 
-    print(duplicated_volumes)
+    finally:
+        # Close the SSH connection
+        stdin.close()
+        ssh.close()
 
-    return duplicated_volumes
+    return complete
 
 
 def conc_model(conn):
     """
-    For use in handle_client() function.
+    For use in handle_client() function. Takes background & sample CSVs & generates ML model from corrected data.
+
+    :param conn: Socket object to facilitate connection to 32-bit client.
     :return:
     """
 
-    # Define output path for data
-    out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing"
+    # Define paths for output data and protocol to be uploaded
+    # out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\22-Oct Almost Full Auto w. Offsets"
+    out_path = get_output_path()
+
+    # protocol_name = "Mixtures Expt - SSH"
+    protocol_path = get_output_path()
+    protocol_name = protocol_path.split("/")[-1]
+
     verification = False
 
     while True:
-
-        # Ask plate reader to take blank reading of plate
-        # Wait for user confirmation to proceed
-
+        # Ask plate reader to take blank reading of plate. Wait for user confirmation to proceed
         log_msg("Plate background is required to be taken before proceeding")
 
         while True:
@@ -994,23 +1081,59 @@ def conc_model(conn):
         if msg_type == "PLATE_BACKGROUND":
             log_msg("Plate background data received")
 
-        # Save plate bg to variable
-        plate_background_path = msg_data
-        log_msg("Plate background path saved")
+            # Save plate bg to variable
+            plate_background_path = msg_data
+            log_msg("Plate background path saved")
 
-        volumes_df = gen_volumes_csv()  # Generate volumes for first experiment
-        print(volumes_df.to_csv(sys.stdout, index=False))
+        volumes_df, volumes_path = gen_volumes_csv()  # Generate volumes for first experiment
 
-        ## Make robot prepare samples now ##
+        log_msg("Uploading volumes CSV to OT-2")
+        run_subprocess(volumes_path)  # Upload dupe volume CSV to OT-2 at data/user_storage/protocols/Duplicated_Volumes
+
+        # # Remove this block once auto protocol gen has been sorted
+        # while True:
+        #     user_input = input(">>> Has protocol been updated with new dispense volumes? (yes/no): \n>>> ")
+        #     if user_input.lower() == "yes":
+        #         break
+        #     else:
+        #         log_msg("Waiting for protocol preparation...")
+
+        # Upload updated script to OT-2
+        log_msg("Uploading protocol to OT-2")
+        # run_subprocess(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Honours Python Main\OT-2 Protocols\DoE + Monomers Experiment\Mixtures Expt - SSH.py")
+        run_subprocess(protocol_path)
+        log_msg("Upload complete")
+
+        # Make robot prepare samples
         log_msg("Please allow robot to prepare samples before proceeding")
 
-        # Wait for user confirmation to proceed
+        # SSH into OT-2 and run opentrons_execute command
+        log_msg(f"SSh'ing into OT-2 and running opentrons_execute command on protocol {protocol_name}")
+        output = run_ssh_command(protocol_name)
+        # output=True
+
+        # Wait for robot confirmation that run is complete
         while True:
-            user_input = input(">>> Has full plate been prepared and ready to be inserted? (yes/no): \n>>> ")
-            if user_input.lower() == "yes":
+            # Check for the phrase "Protocol Finished" in shell output
+            if output:
+                log_msg("OT-2 protocol finished, proceeding")
                 break
+
             else:
-                log_msg("Waiting for plate preparation...")
+                log_msg("OT-2 either not finished protocol or error has occurred")
+                user_input = input(">>> Proceed manually? \n>>> ")
+                if user_input.lower() == "yes":
+                    break
+                else:
+                    pass
+
+        # # Remove this block once labware definition for plate reader tray has been sorted
+        # while True:
+        #     user_input = input(">>> Has full plate been prepared and ready to be inserted? (yes/no): \n>>> ")
+        #     if user_input.lower() == "yes":
+        #         break
+        #     else:
+        #         log_msg("Waiting for plate preparation...")
 
         log_msg("Requesting to run measurement protocol")
         send_message(conn, "RUN_PROTOCOL", "Empty Plate Reading")
@@ -1045,12 +1168,16 @@ def conc_model(conn):
                 verify_models(plate_background_path, data_path, volumes_df, out_path, models, scaler)
                 log_msg("Verification step complete")
 
-        # Test certain conditions being met after analysis completed
-        test = input(">>> Wawaweewa? \n>>> ")  # Imagine this is some condition being met from the ML quality parameters
+                break  # should break from outer loop
 
-        if test == "a":
+        # Test certain conditions being met after analysis completed
+        # test = input(">>> Condition met? \n>>> ")  # Imagine this is some condition being met from the ML quality parameters
+        test = "yes"
+
+        if test.lower() == "yes":
             pass
             verification = True
+            log_msg("Decision - verification requested")
             # loop repeats to take set of verification samples
 
         else:
@@ -1105,6 +1232,7 @@ def server_main():
 
 
 if __name__ == "__main__":
+    # gen_volumes_csv()
     server_main()
 
     # # Load data
