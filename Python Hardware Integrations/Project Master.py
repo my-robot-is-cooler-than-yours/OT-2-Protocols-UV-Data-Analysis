@@ -56,7 +56,7 @@ def get_output_path():
     """
     Prompt the user to select an output folder or create a new folder to save experiment results.
 
-    :return: Full path of the selected or created folder.
+    :return: Full path of the selected folder.
     """
     root = Tk()
     root.withdraw()  # Hide the main Tkinter window
@@ -66,11 +66,34 @@ def get_output_path():
         output_path = filedialog.askdirectory(title="Select Output Folder")
 
         if not output_path:
-            log_msg("No folder selected, please select a folder or file.")
+            log_msg("No folder selected, please select a folder.")
         else:
             break
 
+    root.quit()  # Close the Tkinter root window
     return output_path
+
+
+def get_file_path():
+    """
+    Prompt the user to select a file.
+
+    :return: Full path of the selected file.
+    """
+    root = Tk()
+    root.withdraw()  # Hide the main Tkinter window
+
+    while True:
+        # Prompt the user to select a file
+        file_name = filedialog.askopenfilename(title="Select a File")
+
+        if not file_name:
+            log_msg("No file selected, please select a file.")
+        else:
+            break
+
+    root.quit()  # Close the Tkinter root window
+    return file_name
 
 
 def timeit(func):
@@ -621,17 +644,17 @@ def spectra_pca(df: pd.DataFrame, num_components: int, volumes: np.ndarray, plot
 
 
 @timeit
-def curve_fitting_lin_reg():
+def curve_fitting_lin_reg(plate_path, data_path, volumes_path, out_path):
     # Paths
-    plate_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Plate 2a.csv"
-    data_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\240919_1305.csv"
+    # plate_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Plate 2a.csv"
+    # data_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\240919_1305.csv"
     styrene_spectrum_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Styrene & PS Cuvette Specs\PRD Plate Reader Specs\styrene 0.025 mgmL.csv"
     polystyrene_spectrum_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Styrene & PS Cuvette Specs\PRD Plate Reader Specs\polystyrene 0.250 mgmL.csv"
-    volumes_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Volumes 18-Sep Duplicated.csv"
-    out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Test Folders\02-Oct-2024 expanded script figures"
+    # volumes_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Volumes 18-Sep Duplicated.csv"
+    # out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Test Folders\02-Oct-2024 expanded script figures"
 
-    range_start = 0
-    range_end = 780
+    range_start = 40
+    range_end = None
 
     # Load data
     data_corrected = separate_subtract_and_recombine(load_data_new(data_path), load_data_new(plate_path))
@@ -803,18 +826,16 @@ def ml_screening(plate_path, data_path, volumes_df, out_path):
     fig.suptitle('Model Predictions vs Actual Concentrations', fontsize=16)
 
     # Plot each model's predictions and add R² and MSE values
-    for i, (name, y_pred) in enumerate(models.items()):
-        # # Calculate metrics for Styrene and Polystyrene
-        # r2_styrene = r2_score(y_test[:, 0], y_pred[:, 0])
-        # mse_styrene = mean_squared_error(y_test[:, 0], y_pred[:, 0])
-        #
-        # r2_polystyrene = r2_score(y_test[:, 1], y_pred[:, 1])
-        # mse_polystyrene = mean_squared_error(y_test[:, 1], y_pred[:, 1])
-        #
-        # log_msg(
-        #     f"Model: {name} - R^2 = {r2_styrene: .4f}/{r2_polystyrene: .4f} - MSE: {mse_styrene: .4f}/{mse_polystyrene: .4f}")
-
+    for i, (name, model) in enumerate(models.items()):
+        # Predict for the current model
         y_pred = model.predict(X_test_scaled)
+
+        # Calculate metrics for Styrene and Polystyrene
+        r2_styrene = r2_score(y_test[:, 0], y_pred[:, 0])
+        mse_styrene = mean_squared_error(y_test[:, 0], y_pred[:, 0])
+
+        r2_polystyrene = r2_score(y_test[:, 1], y_pred[:, 1])
+        mse_polystyrene = mean_squared_error(y_test[:, 1], y_pred[:, 1])
 
         # Styrene (first column of y)
         axes[i, 0].scatter(y_test[:, 0], y_pred[:, 0], alpha=0.7)
@@ -824,7 +845,7 @@ def ml_screening(plate_path, data_path, volumes_df, out_path):
         axes[i, 0].set_title(f'{name} - Styrene')
 
         # Add R² and MSE as text annotations
-        axes[i, 0].text(0.05, 0.9, f'R² = {r2_styrene: .4f}\nMSE = {mse_styrene: .4f}',
+        axes[i, 0].text(0.05, 0.9, f'R² = {r2_styrene:.4f}\nMSE = {mse_styrene:.4f}',
                         transform=axes[i, 0].transAxes, fontsize=10, verticalalignment='top',
                         bbox=dict(facecolor='white', alpha=0.5))
 
@@ -842,8 +863,7 @@ def ml_screening(plate_path, data_path, volumes_df, out_path):
 
     # Adjust layout
     plt.tight_layout(rect=(0, 0, 1, 0.96))
-    plt.savefig(
-        out_path + r"\model screening concs restrict domain please dont be broken.png")
+    plt.savefig(out_path + r"\model_screening_concs_corrected.png")
 
     # Convert the metrics dictionary to a DataFrame for easy manipulation
     metrics_df = pd.DataFrame(metrics)
@@ -1007,7 +1027,7 @@ def run_ssh_command(protocol_name):
             line = stdout.readline()  # Read each line as it's received
             if not line:  # Break the loop when there's no more output
                 break
-            log_msg(line, end='')  # log_msg the output line by line without extra newlines
+            print(line, end='')  # log_msg the output line by line without extra newlines
 
             # Store the line in the full output list
             full_output.append(line)
@@ -1206,8 +1226,19 @@ def conc_model(conn, user_name: str = "Lachlan"):
                 break  # should break from outer loop
 
         # Test certain conditions being met after analysis completed
+
+        # Decision based on metrics for verification
+        styrene_valid = all(r2 >= 0.90 and mse < 0.001 for r2, mse in zip(metrics['R² Styrene'], metrics['MSE Styrene']))
+        polystyrene_valid = all(r2 >= 0.90 and mse < 0.001 for r2, mse in zip(metrics['R² Polystyrene'], metrics['MSE Polystyrene']))
+
+        if styrene_valid and polystyrene_valid:
+            log_msg("Initial model parameters OK - verification step authorised.")
+            test = "yes"
+        else:
+            log_msg("Model parameters poor. Closing loop.")
+            test = "no"
+
         # test = input(">>> Condition met? \n>>> ")  # Imagine this is some condition being met from the ML quality parameters
-        test = "yes"
 
         if test.lower() == "yes":
             pass
@@ -1247,7 +1278,7 @@ def conc_model_for_testing(conn, user_name: str = "Lachlan"):
 
     # protocol_name = "Mixtures Expt - SSH"
     log_msg("Select path for protocol upload:")
-    protocol_path = get_output_path()
+    protocol_path = get_file_path()
     protocol_name = protocol_path.split("/")[-1]
 
     verification = False
@@ -1290,7 +1321,7 @@ def conc_model_for_testing(conn, user_name: str = "Lachlan"):
         while not upload_success:
             try:
                 log_msg("Uploading volumes data to OT-2")
-                # run_subprocess(volumes_path)
+                run_subprocess(volumes_path)
                 log_msg("Upload complete")
                 upload_success = True
             except Exception as e:
@@ -1304,7 +1335,7 @@ def conc_model_for_testing(conn, user_name: str = "Lachlan"):
         while not upload_success:
             try:
                 log_msg("Uploading protocol to OT-2")
-                # run_subprocess(protocol_path)
+                run_subprocess(protocol_path)
                 log_msg("Upload complete")
                 upload_success = True
             except Exception as e:
@@ -1319,8 +1350,8 @@ def conc_model_for_testing(conn, user_name: str = "Lachlan"):
 
         # SSH into OT-2 and run opentrons_execute command
         log_msg(f"SSh'ing into OT-2 and running opentrons_execute command on protocol {protocol_name}")
-        # output = run_ssh_command(protocol_name)
-        output = True
+        output = run_ssh_command(protocol_name)
+        # output = True
 
         # Wait for robot confirmation that run is complete
         while True:
@@ -1372,9 +1403,16 @@ def conc_model_for_testing(conn, user_name: str = "Lachlan"):
 
                 break  # should break from outer loop
 
-        # Test certain conditions being met after analysis completed
-        # test = input(">>> Condition met? \n>>> ")  # Imagine this is some condition being met from the ML quality parameters
-        test = "yes"
+        # Decision based on metrics for verification
+        styrene_valid = all(r2 >= 0.90 and mse < 0.005 for r2, mse in zip(metrics['R² Styrene'], metrics['MSE Styrene']))
+        polystyrene_valid = all(r2 >= 0.90 and mse < 0.005 for r2, mse in zip(metrics['R² Polystyrene'], metrics['MSE Polystyrene']))
+
+        if styrene_valid or polystyrene_valid:
+            log_msg("Initial model parameters OK - verification step authorised.")
+            test = "yes"
+        else:
+            log_msg("Model parameters poor. Closing loop.")
+            test = "no"
 
         if test.lower() == "yes":
             pass
@@ -1391,9 +1429,14 @@ def conc_model_for_testing(conn, user_name: str = "Lachlan"):
     experiment_metadata["end_time"] = end_time
     log_msg(f"Experiment ended at {end_time}")
 
-    # Save experiment metadata
-    with open(os.path.join(out_path, 'experiment_metadata.json'), 'w') as f:
-        json.dump(experiment_metadata, f, indent=4)
+    # Convert metrics df to dict
+    experiment_metadata["Metrics"] = metrics.to_dict()
+
+    # Save experiment metadata ensuring correct encoding
+    with open(os.path.join(
+            r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\28-Oct Full Auto",
+            'experiment_metadata_test.json'), 'w', encoding='utf-8') as f:
+        json.dump(experiment_metadata, f, indent=4, ensure_ascii=False)
 
     log_msg("Metadata saved")
 
@@ -1448,7 +1491,26 @@ def server_main():
 
 
 if __name__ == "__main__":
-    server_main()
+    # server_main()
+    models, metrics, scaler = ml_screening(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\241028_1526.csv",
+                 r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\241028_1542.csv",
+                 load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\28-Oct Full Auto\initial volumes duped.csv"),
+                 r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\28-Oct Full Auto")
+
+    experiment_metadata = {
+        "user": "LA",
+        "start_time": "Test",
+        "output_path": "Test"
+    }
+
+    experiment_metadata["Metrics"] = metrics.to_dict()
+
+    # Save experiment metadata
+    with open(os.path.join(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\28-Oct Full Auto",
+                           'experiment_metadata_test.json'), 'w', encoding='utf-8') as f:
+        json.dump(experiment_metadata, f, indent=4, ensure_ascii=False)
+
+
 
     # # Load data
     # plate = load_data_new(
