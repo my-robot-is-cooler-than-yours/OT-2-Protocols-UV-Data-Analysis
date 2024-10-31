@@ -25,9 +25,21 @@ import subprocess
 from tkinter import Tk
 from tkinter import filedialog
 import json
+from sklearn.decomposition import PCA
+from sklearn.cross_decomposition import PLSRegression
+from sklearn.linear_model import LinearRegression, Ridge, ElasticNet
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.svm import SVR
+from sklearn.neural_network import MLPRegressor
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.model_selection import train_test_split
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
 
 # Set plotting parameters globally
-mpl.rcParams.update({'font.size': 12})
 mpl.rcParams['figure.dpi'] = 600
 mpl.rcParams['font.family'] = 'Times New Roman'
 
@@ -654,7 +666,7 @@ def curve_fitting_lin_reg(plate_path, data_path, volumes_path, out_path):
     # out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Test Folders\02-Oct-2024 expanded script figures"
 
     range_start = 40
-    range_end = None
+    range_end = 120
 
     # Load data
     data_corrected = separate_subtract_and_recombine(load_data_new(data_path), load_data_new(plate_path))
@@ -668,7 +680,7 @@ def curve_fitting_lin_reg(plate_path, data_path, volumes_path, out_path):
     styrene_pred, styrene_actual, ps_pred, ps_actual = process_samples(
         data_corrected, volumes_df, styrene_spectrum, polystyrene_spectrum, range_start, range_end,
         deconvolution_method,
-        plot_spectra=False)
+        plot_spectra=True, out_path=out_path)
 
     # Styrene
     # Split into training and test data
@@ -679,8 +691,8 @@ def curve_fitting_lin_reg(plate_path, data_path, volumes_path, out_path):
     regr_styrene, y_pred = linear_regression(x_train, y_train, x_test, y_test)
 
     # Plot and save results
-    # plot_results(x_test, y_test, y_pred, regr_styrene, rf"{out_path}\linear model styrene LSR.png",
-    #              "Predicted Spectral Fraction vs Actual Concentration of Styrene", "Styrene Concentration (mg/mL)")
+    plot_results(x_test, y_test, y_pred, regr_styrene, rf"{out_path}\linear model styrene LSR.png",
+                 "Predicted Spectral Fraction vs Actual Concentration of Styrene", "Styrene Concentration (mg/mL)")
 
     # Polystyrene
     # Split into training and test data
@@ -691,31 +703,31 @@ def curve_fitting_lin_reg(plate_path, data_path, volumes_path, out_path):
     regr_polystyrene, y_pred = linear_regression(x_train, y_train, x_test, y_test)
 
     # Plot and save results
-    # plot_results(x_test, y_test, y_pred, regr_polystyrene, rf"{out_path}\linear model polystyrene LSR.png",
-    #              "Predicted Spectral Fraction vs Actual Concentration of Polystyrene",
-    #              "Polystyrene Concentration (mg/mL)")
+    plot_results(x_test, y_test, y_pred, regr_polystyrene, rf"{out_path}\linear model polystyrene LSR.png",
+                 "Predicted Spectral Fraction vs Actual Concentration of Polystyrene",
+                 "Polystyrene Concentration (mg/mL)")
 
-    # Pass in new data from 23-Sep Expt
-    new_data_raw_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\23-Sep-2024\240923_1512.csv"
-    plate_2c_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\23-Sep-2024\plate 2c.csv"
-    new_volumes_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\23-Sep-2024\Volumes No Solvent 23-Sep Duplicated.csv"
-
-    new_data_raw = load_data_new(new_data_raw_path)
-    plate_2c = load_data_new(plate_2c_path)
-    new_volumes_df = load_data(new_volumes_path)
-
-    # Process background etc
-    new_data_processed = separate_subtract_and_recombine(new_data_raw, plate_2c)
-
-    # Deconvolute using cuvette peaks and get coefficients
-    styrene_components_pred, styrene_components_actual, ps_components_pred, ps_components_actual = process_samples(
-        new_data_processed, new_volumes_df, styrene_spectrum, polystyrene_spectrum, range_start, range_end,
-        deconvolution_method)
-
-    styrene_concs_pred = regr_styrene.predict(np.array(styrene_components_pred).reshape(-1, 1))
-    ps_concs_pred = regr_polystyrene.predict(np.array(ps_components_pred).reshape(-1, 1))
-
-    # Plot and save results
+    # # Pass in new data from 23-Sep Expt
+    # new_data_raw_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\23-Sep-2024\240923_1512.csv"
+    # plate_2c_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\23-Sep-2024\plate 2c.csv"
+    # new_volumes_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\23-Sep-2024\Volumes No Solvent 23-Sep Duplicated.csv"
+    #
+    # new_data_raw = load_data_new(new_data_raw_path)
+    # plate_2c = load_data_new(plate_2c_path)
+    # new_volumes_df = load_data(new_volumes_path)
+    #
+    # # Process background etc
+    # new_data_processed = separate_subtract_and_recombine(new_data_raw, plate_2c)
+    #
+    # # Deconvolute using cuvette peaks and get coefficients
+    # styrene_components_pred, styrene_components_actual, ps_components_pred, ps_components_actual = process_samples(
+    #     new_data_processed, new_volumes_df, styrene_spectrum, polystyrene_spectrum, range_start, range_end,
+    #     deconvolution_method)
+    #
+    # styrene_concs_pred = regr_styrene.predict(np.array(styrene_components_pred).reshape(-1, 1))
+    # ps_concs_pred = regr_polystyrene.predict(np.array(ps_components_pred).reshape(-1, 1))
+    #
+    # # Plot and save results
     # plot_results(styrene_components_pred, styrene_components_actual, styrene_concs_pred, regr_styrene,
     #              rf"{out_path}\new data with existing model for styrene LSR.png",
     #              "Predicted Spectral Fraction vs Actual Concentration of Styrene",
@@ -725,27 +737,27 @@ def curve_fitting_lin_reg(plate_path, data_path, volumes_path, out_path):
     #              rf"{out_path}\new data with existing model for polystyrene LSR.png",
     #              "Predicted Spectral Fraction vs Actual Concentration of Polystyrene",
     #              "Polystyrene Concentration (mg/mL)")
+    #
+    # log_msg(f"Mean squared error: {mean_squared_error(styrene_components_actual, styrene_concs_pred):.4f}")
+    # log_msg(f"R^2: {r2_score(styrene_components_actual, styrene_concs_pred):.4f}")
+    # log_msg(f"Mean squared error: {mean_squared_error(ps_components_actual, ps_concs_pred):.4f}")
+    # log_msg(f"R^2: {r2_score(ps_components_actual, ps_concs_pred):.4f}")
 
-    log_msg(f"Mean squared error: {mean_squared_error(styrene_components_actual, styrene_concs_pred):.4f}")
-    log_msg(f"R^2: {r2_score(styrene_components_actual, styrene_concs_pred):.4f}")
-    log_msg(f"Mean squared error: {mean_squared_error(ps_components_actual, ps_concs_pred):.4f}")
-    log_msg(f"R^2: {r2_score(ps_components_actual, ps_concs_pred):.4f}")
-
-    crude = load_data_new(
-        r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\crude df 80.csv")
-
-    # Deconvolute using cuvette peaks and get coefficients
-    styrene_components_pred, styrene_components_actual, ps_components_pred, ps_components_actual = process_samples(
-        crude, new_volumes_df, styrene_spectrum, polystyrene_spectrum, range_start, range_end, deconvolution_method,
-        plot_spectra=True,
-        out_path=r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\04-Oct-2024 Crude")
-
-    styrene_concs_pred = regr_styrene.predict(np.array(styrene_components_pred).reshape(-1, 1))
-    ps_concs_pred = regr_polystyrene.predict(np.array(ps_components_pred).reshape(-1, 1))
-
-    log_msg(styrene_concs_pred)
-    log_msg(ps_concs_pred)
-    log_msg(styrene_concs_pred / ps_concs_pred)
+    # crude = load_data_new(
+    #     r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\crude df 80.csv")
+    #
+    # # Deconvolute using cuvette peaks and get coefficients
+    # styrene_components_pred, styrene_components_actual, ps_components_pred, ps_components_actual = process_samples(
+    #     crude, new_volumes_df, styrene_spectrum, polystyrene_spectrum, range_start, range_end, deconvolution_method,
+    #     plot_spectra=True,
+    #     out_path=r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\04-Oct-2024 Crude")
+    #
+    # styrene_concs_pred = regr_styrene.predict(np.array(styrene_components_pred).reshape(-1, 1))
+    # ps_concs_pred = regr_polystyrene.predict(np.array(ps_components_pred).reshape(-1, 1))
+    #
+    # log_msg(styrene_concs_pred)
+    # log_msg(ps_concs_pred)
+    # log_msg(styrene_concs_pred / ps_concs_pred)
 
 
 @timeit
@@ -763,7 +775,7 @@ def ml_screening(plate_path, data_path, volumes_df, out_path):
 
     # Define range of wavelengths to search
     start_index = 40
-    end_index = None
+    end_index = 120
 
     # Extract features (absorbance spectra) and targets (concentrations)
     X = volumes_abs[:, start_index:end_index]  # Absorbance spectra
@@ -794,7 +806,9 @@ def ml_screening(plate_path, data_path, volumes_df, out_path):
         'R² Styrene': [],
         'MSE Styrene': [],
         'R² Polystyrene': [],
-        'MSE Polystyrene': []
+        'MSE Polystyrene': [],
+        'Coefficients': [],
+        'Intercepts': []
     }
 
     # Train models and store predictions
@@ -820,6 +834,23 @@ def ml_screening(plate_path, data_path, volumes_df, out_path):
         metrics['MSE Styrene'].append(mse_styrene)
         metrics['R² Polystyrene'].append(r2_polystyrene)
         metrics['MSE Polystyrene'].append(mse_polystyrene)
+
+        # Check and save model coefficients and intercepts if they exist
+        if hasattr(model, 'coef_'):
+            # Convert coefficients to list for JSON serialization
+            metrics['Coefficients'].append(model.coef_.tolist())
+        else:
+            metrics['Coefficients'].append(None)
+
+        if hasattr(model, 'intercept_'):
+            # Convert intercepts to list for JSON serialization
+            # Intercept can be scalar or array, so convert accordingly
+            if isinstance(model.intercept_, np.ndarray):
+                metrics['Intercepts'].append(model.intercept_.tolist())
+            else:
+                metrics['Intercepts'].append(model.intercept_)
+        else:
+            metrics['Intercepts'].append(None)
 
     # Create subplots: one row for each model, two columns for styrene and polystyrene
     fig, axes = plt.subplots(len(models), 2, figsize=(12, 4 * len(models)))
@@ -873,6 +904,101 @@ def ml_screening(plate_path, data_path, volumes_df, out_path):
     return models, metrics_df, scaler
 
 
+def ml_screening_multi(plate_path, data_path, volumes_df, out_path):
+    # Correct data
+    data_corrected = separate_subtract_and_recombine(load_data_new(data_path), load_data_new(plate_path))
+
+    # Load in volumes
+    volumes = volumes_df
+    volumes_abs = pd.concat([volumes, data_corrected.iloc[:, 1:]], axis=1).to_numpy()
+
+    # Correct from volume to concentration
+    num_analytes = volumes.shape[1]-1  # Number of analytes from the volume DataFrame
+    for i in range(num_analytes):
+        volumes_abs[:, i] *= [0.025, 0.25, 0.005][i] / 300  # Replace with correct factors as needed
+
+    # Define range of wavelengths to search
+    start_index = 40
+    end_index = 120
+
+    # Extract features (absorbance spectra) and targets (concentrations)
+    X = volumes_abs[:, start_index:end_index]  # Absorbance spectra
+    y = volumes_abs[:, :num_analytes]  # Concentrations for all analytes
+
+    # Split data into training and testing sets
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Normalize the features
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+
+    # Initialize models to test
+    models = {
+        'Linear Regression': LinearRegression(),
+        'Ridge Regression': Ridge(),
+        'Random Forest': RandomForestRegressor(),
+    }
+
+    # List to store the metrics for each model
+    metrics = {'Model': []}
+    for i in range(num_analytes):
+        metrics[f'R² Analyte {i + 1}'] = []
+        metrics[f'MSE Analyte {i + 1}'] = []
+
+    metrics['Coefficients'] = []
+    metrics['Intercepts'] = []
+
+    # Train models and store predictions
+    for name, model in models.items():
+        model.fit(X_train_scaled, y_train)
+        y_pred = model.predict(X_test_scaled)
+
+        # Append model name
+        metrics['Model'].append(name)
+
+        # Calculate metrics for each analyte
+        for i in range(num_analytes):
+            r2 = r2_score(y_test[:, i], y_pred[:, i])
+            mse = mean_squared_error(y_test[:, i], y_pred[:, i])
+            metrics[f'R² Analyte {i + 1}'].append(r2)
+            metrics[f'MSE Analyte {i + 1}'].append(mse)
+
+        # Check and save model coefficients and intercepts if they exist
+        metrics['Coefficients'].append(getattr(model, 'coef_', None).tolist() if hasattr(model, 'coef_') else None)
+        metrics['Intercepts'].append(
+            getattr(model, 'intercept_', None).tolist() if hasattr(model, 'intercept_') else None)
+
+    # Create subplots dynamically based on analytes
+    fig, axes = plt.subplots(len(models), num_analytes, figsize=(6 * num_analytes, 4 * len(models)))
+    fig.suptitle('Model Predictions vs Actual Concentrations', fontsize=16)
+
+    for i, (name, model) in enumerate(models.items()):
+        y_pred = model.predict(X_test_scaled)
+
+        for j in range(num_analytes):
+            ax = axes[i, j] if num_analytes > 1 else axes[i]
+            ax.scatter(y_test[:, j], y_pred[:, j], alpha=0.7)
+            ax.plot([y_test[:, j].min(), y_test[:, j].max()], [y_test[:, j].min(), y_test[:, j].max()], 'k--', lw=2)
+            ax.set_xlabel(f'Actual Analyte {j + 1} Concentration')
+            ax.set_ylabel(f'Predicted Analyte {j + 1} Concentration')
+            ax.set_title(f'{name} - Analyte {j + 1}')
+            r2 = r2_score(y_test[:, j], y_pred[:, j])
+            mse = mean_squared_error(y_test[:, j], y_pred[:, j])
+            ax.text(0.05, 0.9, f'R² = {r2:.4f}\nMSE = {mse:.4f}',
+                    transform=ax.transAxes, fontsize=10, verticalalignment='top',
+                    bbox=dict(facecolor='white', alpha=0.5))
+
+    # Adjust layout and save plot
+    plt.tight_layout(rect=(0, 0, 1, 0.96))
+    plt.savefig(out_path + r"\model_screening_concs_corrected.png")
+
+    # Convert metrics dictionary to a DataFrame
+    metrics_df = pd.DataFrame(metrics)
+
+    return models, metrics_df, scaler
+
+
 def verify_models(plate_path, data_path, volumes_df, out_path, models, scaler):
     # Begin verification #
 
@@ -887,7 +1013,7 @@ def verify_models(plate_path, data_path, volumes_df, out_path, models, scaler):
 
     # Define range of wavelengths to search
     start_index = 40
-    end_index = None
+    end_index = 120
 
     # Extract features (absorbance spectra) and targets (concentrations)
     X = volumes_abs[:, start_index:end_index]  # Absorbance spectra
@@ -1388,6 +1514,11 @@ def conc_model_for_testing(conn, user_name: str = "Lachlan"):
 
                 log_msg(f"\n{metrics}")
 
+                # try:
+                #     curve_fitting_lin_reg(plate_background_path, data_path, volumes_path, out_path)
+                # except Exception as e:
+                #     log_msg(f"An error occured during curve fitting linear regression: {e}")
+
             elif verification is True:
                 log_msg("!!!Verification Step!!!")
                 log_msg(f"Measurement complete")
@@ -1441,6 +1572,178 @@ def conc_model_for_testing(conn, user_name: str = "Lachlan"):
     log_msg("Metadata saved")
 
 
+def measurements_over_time(conn, user_name: str = "Lachlan"):
+    """
+    Takes measurements over time and plots absorbance at given wavelength as function of time between measurements.
+
+    :param conn: Socket object to facilitate connection to 32-bit client.
+    :param user_name: Name of the user running the experiment, obtained when handle_client() is run.
+    :return:
+    """
+    start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
+    # Define paths for output data and protocol to be uploaded
+    log_msg("Select path for data output:")
+    out_path = get_output_path()
+
+    # protocol_name = "Mixtures Expt - SSH"
+    log_msg("Select path for protocol upload:")
+    protocol_path = get_file_path()
+    protocol_name = protocol_path.split("/")[-1]
+
+    # Dictionary for experiment metadata
+    experiment_metadata = {
+        "user": user_name,
+        "start_time": start_time,
+        "output_path": out_path
+    }
+
+    while True:
+        # Ask plate reader to take blank reading of plate. Wait for user confirmation to proceed
+        log_msg("Plate background is required to be taken before proceeding")
+
+        while True:
+            user_input = input(">>> Has empty plate been prepared and ready to be inserted? (yes/no): \n>>> ")
+            if user_input.lower() == "yes":
+                break
+            else:
+                log_msg("Waiting for plate preparation...")
+
+        log_msg("Requesting plate background from reader")
+        send_message(conn, "PLATE_BACKGROUND", "Empty Plate Reading")
+
+        log_msg("Awaiting message from client")
+        msg_type, msg_data = receive_message(conn)
+
+        if msg_type == "PLATE_BACKGROUND":
+            log_msg("Plate background data received")
+
+            # Save plate bg to variable
+            plate_background_path = msg_data
+            log_msg("Plate background path saved")
+
+        upload_success = False
+        while not upload_success:
+            try:
+                log_msg("Uploading protocol to OT-2")
+                # run_subprocess(protocol_path)
+                log_msg("Upload complete")
+                upload_success = True
+            except Exception as e:
+                log_msg(f"Error uploading protocol: {e}")
+                user_input = input(">>> Retry upload? (yes/no): \n>>> ")
+                if user_input.lower() != "yes":
+                    log_msg("Upload cancelled by user")
+                    break
+
+        # Make robot prepare samples
+        log_msg("Please allow robot to prepare samples before proceeding")
+
+        # SSH into OT-2 and run opentrons_execute command
+        log_msg(f"SSh'ing into OT-2 and running opentrons_execute command on protocol {protocol_name}")
+        output = run_ssh_command(protocol_name)
+        # output = True
+
+        # Wait for robot confirmation that run is complete
+        while True:
+            # Check for the phrase "Protocol Finished" in shell output
+            if output:
+                log_msg("OT-2 protocol finished, proceeding")
+                break
+
+            else:
+                log_msg("OT-2 either not finished protocol or error has occurred")
+                user_input = input(">>> Proceed manually? \n>>> ")
+                if user_input.lower() == "yes":
+                    break
+                else:
+                    pass
+
+        data_paths = []
+        time_stamps = []  # Store time stamps for each measurement
+
+        for i in range(7):
+            log_msg("Requesting to run measurement protocol")
+            send_message(conn, "RUN_PROTOCOL", "Empty Plate Reading")
+
+            log_msg("Awaiting message from client")
+            msg_type, msg_data = receive_message(conn)
+
+            if msg_type == "CSV_FILE":
+                log_msg(f"Measurement complete")
+                log_msg(f"Received CSV file with path: {msg_data}")
+
+                data_paths.append(msg_data)
+                time_stamps.append(datetime.now())  # Add current timestamp for each measurement
+                log_msg("Data path saved")
+
+                if i < 7:  # Only wait if there are more measurements to be taken
+                    log_msg("Sleeping for one hour")
+                    time.sleep(600)  # sleep for 10 mins before measuring again
+
+        # Calculate averages and standard deviations
+        abs_std_dev = []
+
+        for path in data_paths:
+            plate = load_data_new(plate_background_path)
+            data = load_data_new(path)
+
+            corrected_array = separate_subtract_and_recombine(data, plate, 0).iloc[:25, 40].to_numpy()
+
+            average = np.average(corrected_array)
+            std = np.std(corrected_array)
+
+            abs_std_dev.append((average, std))
+
+        # Extract averages, standard deviations, and times for plotting
+        averages = [item[0] for item in abs_std_dev]
+        std_devs = [item[1] for item in abs_std_dev]
+        times = [(t - time_stamps[0]).total_seconds() / 60 for t in time_stamps]  # Minutes from start
+
+        # Create a figure and axis
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        # Plot data with error bars for standard deviation
+        ax.errorbar(times, averages, yerr=std_devs, fmt='-o', ecolor='gray', capsize=5)
+        ax.plot(times, averages, 'o-', label='Average Absorbance')
+
+        # Add labels and titles
+        ax.set_xlabel('Time (minutes)')
+        ax.set_ylabel('Average Absorbance')
+        ax.set_title('Absorbance of Styrene in BuOAc Over Time')
+
+        # # Add annotations for the first and last points
+        # ax.text(times[0], averages[0], f'Avg: {averages[0]:.4f}\nStd: {std_devs[0]:.4f}',
+        #         ha='right', va='bottom', fontsize=10, bbox=dict(facecolor='white', alpha=0.5))
+        # ax.text(times[-1], averages[-1], f'Avg: {averages[-1]:.4f}\nStd: {std_devs[-1]:.4f}',
+        #         ha='left', va='bottom', fontsize=10, bbox=dict(facecolor='white', alpha=0.5))
+
+        # Show grid, legend, and layout adjustments
+        ax.grid(True)
+        # plt.tight_layout(rect=(0, 0, 1, 0.96))
+        plt.tight_layout()
+        plt.savefig(out_path + r"\absorbance_over_time.png")
+        plt.show()
+
+        if True:
+            break
+
+        else:
+            break
+
+    end_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    experiment_metadata["end_time"] = end_time
+    log_msg(f"Experiment ended at {end_time}")
+
+    # Save experiment metadata ensuring correct encoding
+    with open(os.path.join(
+            out_path,
+            'experiment_metadata_test.json'), 'w', encoding='utf-8') as f:
+        json.dump(experiment_metadata, f, indent=4, ensure_ascii=False)
+
+    log_msg("Metadata saved")
+
+
 @timeit
 def handle_client(conn):
     """Handle multiple messages from the client.
@@ -1450,7 +1753,13 @@ def handle_client(conn):
         user_name = input(">>> Enter your name: \n>>> ")
 
         while True:
-            choice = input(">>> Enter workflow number: \n1. Conc Model \n2. Test Conc Model \n3. Shutdown \n>>> ")
+            choice = input(">>> Enter workflow number: "
+                           "\n1. Conc Model "
+                           "\n2. Test Conc Model "
+                           "\n3. Measurements Over Time "
+                           "\n4. Shutdown "
+                           "\n>>> "
+                           )
 
             if choice == "1":
                 conc_model(conn, user_name)
@@ -1459,6 +1768,9 @@ def handle_client(conn):
                 conc_model_for_testing(conn, user_name)
 
             if choice == "3":
+                measurements_over_time(conn, user_name)
+
+            if choice == "4":
                 send_message(conn, "SHUTDOWN")
                 break
 
@@ -1492,25 +1804,94 @@ def server_main():
 
 if __name__ == "__main__":
     # server_main()
-    models, metrics, scaler = ml_screening(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\241028_1526.csv",
-                 r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\241028_1542.csv",
-                 load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\28-Oct Full Auto\initial volumes duped.csv"),
-                 r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\28-Oct Full Auto")
 
-    experiment_metadata = {
-        "user": "LA",
-        "start_time": "Test",
-        "output_path": "Test"
-    }
+    ### Evaporation Over Time Code
+    # data_paths = [r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Evaporation\300 uL Open to Air Auto 30-Oct\241030_1535.csv",
+    # r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Evaporation\300 uL Open to Air Auto 30-Oct\241030_1413.csv",
+    # r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Evaporation\300 uL Open to Air Auto 30-Oct\241030_1427.csv",
+    # r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Evaporation\300 uL Open to Air Auto 30-Oct\241030_1440.csv",
+    # r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Evaporation\300 uL Open to Air Auto 30-Oct\241030_1455.csv",
+    # r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Evaporation\300 uL Open to Air Auto 30-Oct\241030_1509.csv",
+    # r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Evaporation\300 uL Open to Air Auto 30-Oct\241030_1522.csv"
+    # ]
+    #
+    # plate_background_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Evaporation\300 uL Open to Air Auto 30-Oct\241030_1405.csv"
+    #
+    # out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Evaporation\300 uL Open to Air Auto 30-Oct"
+    #
+    # # Calculate averages and standard deviations
+    # abs_std_dev = []
+    #
+    # for path in data_paths:
+    #     plate = load_data_new(plate_background_path)
+    #     data = load_data_new(path)
+    #
+    #     corrected_array = separate_subtract_and_recombine(data, plate, 0)[260][:25].to_numpy()
+    #
+    #     print(corrected_array)
+    #
+    #     average = np.average(corrected_array)
+    #     std = np.std(corrected_array)
+    #
+    #     abs_std_dev.append((average, std))
+    #
+    # # Extract averages, standard deviations, and times for plotting
+    # averages = [item[0] for item in abs_std_dev]
+    # std_devs = [item[1] for item in abs_std_dev]
+    # times = np.arange(0,61,10)
+    #
+    # # Create a figure and axis
+    # fig, ax = plt.subplots(figsize=(10, 6))
+    #
+    # # Plot data with error bars for standard deviation
+    # ax.errorbar(times, averages, yerr=std_devs, fmt='-o', ecolor='gray', capsize=5)
+    # ax.plot(times, averages, 'o-', label='Average Absorbance')
+    #
+    # # Add labels and titles
+    # ax.set_xlabel('Time (minutes)')
+    # ax.set_ylabel('Average Absorbance')
+    # ax.set_title('Absorbance of Styrene in BuOAc Over Time')
+    #
+    # # Show grid, legend, and layout adjustments
+    # ax.grid(True)
+    # # plt.tight_layout(rect=(0, 0, 1, 0.96))
+    # plt.tight_layout()
+    # # plt.savefig(out_path + r"\absorbance_over_time.png")
+    # # plt.show()
 
-    experiment_metadata["Metrics"] = metrics.to_dict()
+    plate = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\first run\241029_1125.csv"
+    data = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\first run\241029_1214.csv"
+    volumes = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\first run\Duplicated_Volumes training.csv")
+    out = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Test Folders\Inverse Prediction"
+    volumes = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\Duplicated_Volumes.csv")
 
-    # Save experiment metadata
-    with open(os.path.join(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\28-Oct Full Auto",
-                           'experiment_metadata_test.json'), 'w', encoding='utf-8') as f:
-        json.dump(experiment_metadata, f, indent=4, ensure_ascii=False)
+    a, b, c = ml_screening_multi(plate, data, volumes, out)
 
+    plate = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\Second run\241029_1243.csv"
+    data = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\Second run\241029_1339.csv"
+    volumes = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\Second run\Duplicated_Volumes.csv")
 
+    verify_models(plate, data, volumes, out, a, c)
+
+    # curve_fitting_lin_reg(plate, data, vol_path, out+r"\spectra")
+
+    # models, metrics, scaler = ml_screening(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\241028_1526.csv",
+    #              r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\241028_1542.csv",
+    #              load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\28-Oct Full Auto\initial volumes duped.csv"),
+    #              r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\28-Oct Full Auto")
+    #
+    # experiment_metadata = {
+    #     "user": "LA",
+    #     "start_time": "Test",
+    #     "output_path": "Test"
+    # }
+    #
+    # experiment_metadata["Metrics"] = metrics.to_dict()
+    #
+    # # Save experiment metadata
+    # with open(os.path.join(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\28-Oct Full Auto",
+    #                        'experiment_metadata_test.json'), 'w', encoding='utf-8') as f:
+    #     json.dump(experiment_metadata, f, indent=4, ensure_ascii=False)
 
     # # Load data
     # plate = load_data_new(
