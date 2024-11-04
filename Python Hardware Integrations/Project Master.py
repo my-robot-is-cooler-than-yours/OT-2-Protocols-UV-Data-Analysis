@@ -141,7 +141,7 @@ def load_data(path_input: str) -> pd.DataFrame:
     return pd.DataFrame()  # Return an empty DataFrame on failure
 
 
-def generate_lhs_design(num_samples=46, total_volume=300, step_size=20, num_factors=2):
+def generate_lhs_design(num_samples, total_volume, step_size, num_factors):
     # Generate LHS design
     lhs = pyDOE2.lhs(num_factors, samples=num_samples)
 
@@ -150,48 +150,50 @@ def generate_lhs_design(num_samples=46, total_volume=300, step_size=20, num_fact
 
     # Round to the nearest step_size and ensure minimum volume constraint
     scaled_lhs = np.round(scaled_lhs / step_size, 2) * step_size
-    scaled_lhs = np.clip(scaled_lhs, step_size, None)
+    scaled_lhs = np.round(np.clip(scaled_lhs, step_size, None), 2)
 
-    # Calculate the third column (solvent) as 300 minus the sum of the first two columns
+    # Calculate the solvent volume as total_volume minus the sum of the components
     solvent_volumes = total_volume - np.sum(scaled_lhs, axis=1)
 
-    # Combine the first two columns with the new solvent column
+    # Combine the component volumes with the solvent volume as the last column
     scaled_lhs = np.column_stack((scaled_lhs, solvent_volumes))
 
     return scaled_lhs
 
 
-def gen_volumes_csv():
-    # Define constants
-    num_samples = 46  # the number of unique samples to be measured
-    total_volume = 300  # final volume in each well
-    step_size = 20  # minimum step size
-    num_factors = 2  # number of variables (styrene, polystyrene)
-
+def gen_volumes_csv(out_path, num_samples=46, total_volume=300, step_size=20, num_factors=2):
     # Generate and verify the LHS design
     while True:
         scaled_lhs = generate_lhs_design(num_samples, total_volume, step_size, num_factors)
         if np.all(np.sum(scaled_lhs, axis=1) == total_volume) and len(np.unique(scaled_lhs, axis=0)) == num_samples:
-            log_msg("VERIFIED: All samples are unique and sum to 300 uL.")
+            print("VERIFIED: All samples are unique and sum to 300 uL.")
             break
-        log_msg("ERROR: Some samples are not unique or do not sum to 300 uL. Retrying...")
+        print("ERROR: Some samples are not unique or do not sum to 300 uL. Retrying...")
+
+    # Define column names
+    columns = [f'Component {i + 1}' for i in range(num_factors)] + ['Solvent']
 
     # Create DataFrame and save to CSV
-    volumes = pd.DataFrame(scaled_lhs, columns=['Styrene (uL)', 'Polystyrene (uL)', 'Solvent (uL)'])
+    volumes = pd.DataFrame(scaled_lhs, columns=columns)
     current_time = time.strftime("%Y-%m-%d %H_%M_%S", time.localtime())
-    out_path = rf"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\Volumes.csv"
-    volumes.to_csv(out_path, index=False)
+    volumes_file_path = out_path + f"\\Volumes_{current_time}.csv"
+    volumes.to_csv(volumes_file_path, index=False)
 
     # Prepare duplicated volumes and additional solvent rows
-    processed_lhs = np.repeat(scaled_lhs, 2, axis=0)
-    new_rows = pd.DataFrame([[0, 0, 300]] * 4, columns=['Styrene (uL)', 'Polystyrene (uL)', 'Solvent (uL)'])
-    duplicated_volumes = pd.concat([new_rows, pd.DataFrame(processed_lhs, columns=volumes.columns)], ignore_index=True)
-    duplicated_out_path = out_path.replace("Volumes", "Duplicated_Volumes")
-    duplicated_volumes.to_csv(duplicated_out_path, index=False)
+    duplicated_volumes = np.repeat(scaled_lhs, 2, axis=0)
+    duplicated_df = pd.DataFrame(duplicated_volumes, columns=columns)
 
-    log_msg("\n" + duplicated_volumes.round(2).to_csv(index=False))
+    # Add four new rows with zeros in component columns and total_volume in the final column
+    extra_rows = pd.DataFrame([[0] * num_factors + [total_volume]] * 4, columns=columns)
+    duplicated_df = pd.concat([extra_rows, duplicated_df], ignore_index=True)
 
-    return duplicated_volumes, duplicated_out_path
+    # Save duplicated DataFrame to CSV
+    duplicated_out_path = out_path + f"\\Duplicated_Volumes_{current_time}.csv"
+    duplicated_df.to_csv(duplicated_out_path, index=False)
+
+    print("\n" + duplicated_df.round(2).to_csv(index=False))
+
+    return duplicated_df, duplicated_out_path
 
 
 def load_data_new(path: str, start_wavelength: int = 220, end_wavelength: int = 1000) -> pd.DataFrame:
@@ -614,8 +616,9 @@ def spectra_pca(df: pd.DataFrame, num_components: int, volumes: np.ndarray, plot
     :return explained_variance: numpy.ndarray, contains the variance explained by each of the PCs.
     """
     # Convert volumes to concentrations
-    volumes[:, 0] *= 0.025 / 300
-    volumes[:, 1] *= 0.25 / 300
+    num_analytes = volumes.shape[1]-1  # Number of analytes from the volume DataFrame
+    for i in range(num_analytes):
+        volumes[:, i] *= [0.025, 0.25, 0.5][i] / 300  # Replace with correct factors as needed
 
     # Perform PCA
     pca = PCA(n_components=num_components)  # Choose the number of components to retain
@@ -629,26 +632,26 @@ def spectra_pca(df: pd.DataFrame, num_components: int, volumes: np.ndarray, plot
         scatter = plt.scatter(pca_scores[:, 0], pca_scores[:, 1], c=volumes[:, 0], cmap="viridis")
         plt.xlabel('PC1')
         plt.ylabel('PC2')
-        plt.title('PCA: UV-Vis Spectra')
+        plt.title('PCA for Styrene/Toluene/Polystyrene Mixtures')
 
         # Add color bar to show concentration scale
         cbar = plt.colorbar(scatter)
         cbar.set_label('Concentration (mg/mL')
 
-        plt.savefig(out_path)
+        plt.savefig(os.path.join(out_path, f"PCA Scores"))
 
         # Plot the loading of PC1 (contribution of each wavelength to PC1)
         plt.figure()
         plt.plot(np.arange(df.shape[1]) + 220, pca_components[0])
-        plt.xlabel('Wavelength Index')
+        plt.xlabel('Wavelength (nm)')
         plt.ylabel('Loading on PC1')
-        plt.title('PC1 Loading: Wavelength Contributions')
+        plt.title('Wavelength Loading on PC1')
         if x_bounds:
             plt.xlim(x_bounds)
         else:
             plt.xlim()
 
-        plt.savefig(out_path)
+        plt.savefig(os.path.join(out_path, f"PCA Wavelength Weighting"))
     else:
         pass
 
@@ -904,12 +907,9 @@ def ml_screening(plate_path, data_path, volumes_df, out_path):
     return models, metrics_df, scaler
 
 
+@timeit
 def ml_screening_multi(plate_path, data_path, volumes_df, out_path, plot_spectra=False, start_index=20, end_index=200):
-    # Define range of wavelengths to search
-    start_index = 20
-    end_index = 200
-
-    # Correct data
+    # Correct data for background and blank
     data_corrected = separate_subtract_and_recombine(load_data_new(data_path), load_data_new(plate_path))
 
     if plot_spectra:
@@ -1036,80 +1036,58 @@ def ml_screening_multi(plate_path, data_path, volumes_df, out_path, plot_spectra
     return models, metrics_df, scaler
 
 
-def verify_models(plate_path, data_path, volumes_df, out_path, models, scaler):
-    # Begin verification #
-
-    # Load new data for verification
+@timeit
+def verify_models(plate_path, data_path, volumes_df, out_path, models, scaler, start_index=40, end_index=120):
+    # Load and correct data for background and blank
     data_corrected = separate_subtract_and_recombine(load_data_new(data_path), load_data_new(plate_path))
     volumes = volumes_df
-
     volumes_abs = pd.concat([volumes, data_corrected.iloc[:, 1:]], axis=1).to_numpy()
 
-    volumes_abs[:, 0] *= 0.025 / 300
-    volumes_abs[:, 1] *= 0.25 / 300
+    # Adjust concentrations by volume
+    num_analytes = volumes.shape[1] - 1  # Number of analytes based on volumes_df columns
+    for i in range(num_analytes):
+        volumes_abs[:, i] *= [0.025, 0.25, 0.5][i] / 300  # Adjust as needed
 
-    # Define range of wavelengths to search
-    start_index = 40
-    end_index = 120
-
-    # Extract features (absorbance spectra) and targets (concentrations)
+    # Extract features (absorbance spectra) and target concentrations
     X = volumes_abs[:, start_index:end_index]  # Absorbance spectra
-    y_test = volumes_abs[:, :2]  # Concentrations of styrene and polystyrene
+    y_test = volumes_abs[:, :num_analytes]  # Target concentrations
 
-    # Normalize the features
-    X_scaled_new = scaler.transform(X)  # Use the previously fitted scaler
+    # Normalize features using the previously fitted scaler
+    X_scaled_new = scaler.transform(X)
 
-    # Initialize a list to store the predicted results for analysis
+    # Initialize list to store model predictions for the new dataset
     y_pred_new = []
 
-    # Store predictions from models on new data
+    # Generate predictions from models on new data
     for name, model in models.items():
-        # Get predictions on the new data
         y_pred = model.predict(X_scaled_new)
-
-        # Store the predictions for analysis
         y_pred_new.append(y_pred)
 
-    # Create subplots for the new dataset validation
-    fig, axes = plt.subplots(len(models), 2, figsize=(12, 4 * len(models)))
+    # Plot model predictions vs actual values
+    fig, axes = plt.subplots(len(models), num_analytes, figsize=(6 * num_analytes, 4 * len(models)))
     fig.suptitle('Model Predictions vs Actual Concentrations (Validation)', fontsize=16)
 
-    # Plot the predictions vs actual values
     for i, (name, y_pred) in enumerate(zip(models.keys(), y_pred_new)):
-        # Calculate metrics for Styrene and Polystyrene on new data
-        r2_styrene = r2_score(y_test[:, 0], y_pred[:, 0])
-        mse_styrene = mean_squared_error(y_test[:, 0], y_pred[:, 0])
+        for j in range(num_analytes):
+            ax = axes[i, j] if num_analytes > 1 else axes[i]
+            ax.scatter(y_test[:, j], y_pred[:, j], alpha=0.7)
+            ax.plot([y_test[:, j].min(), y_test[:, j].max()], [y_test[:, j].min(), y_test[:, j].max()], 'k--', lw=2)
+            ax.set_xlabel(f'Actual Analyte {j + 1} Concentration')
+            ax.set_ylabel(f'Predicted Analyte {j + 1} Concentration')
+            ax.set_title(f'{name} - Analyte {j + 1}')
 
-        r2_polystyrene = r2_score(y_test[:, 1], y_pred[:, 1])
-        mse_polystyrene = mean_squared_error(y_test[:, 1], y_pred[:, 1])
+            # Calculate and display R² and MSE
+            r2 = r2_score(y_test[:, j], y_pred[:, j])
+            mse = mean_squared_error(y_test[:, j], y_pred[:, j])
+            ax.text(0.05, 0.9, f'R² = {r2:.4f}\nMSE = {mse:.4f}',
+                    transform=ax.transAxes, fontsize=10, verticalalignment='top',
+                    bbox=dict(facecolor='white', alpha=0.5))
 
-        # Styrene (first column of y)
-        axes[i, 0].scatter(y_test[:, 0], y_pred[:, 0], alpha=0.7)
-        axes[i, 0].plot([y_test[:, 0].min(), y_test[:, 0].max()], [y_test[:, 0].min(), y_test[:, 0].max()], 'k--', lw=2)
-        axes[i, 0].set_xlabel('Actual Styrene Concentration')
-        axes[i, 0].set_ylabel('Predicted Styrene Concentration')
-        axes[i, 0].set_title(f'{name} - Styrene')
-
-        # Add R² and MSE as text annotations
-        axes[i, 0].text(0.05, 0.9, f'R² = {r2_styrene:.4f}\nMSE = {mse_styrene:.4f}',
-                        transform=axes[i, 0].transAxes, fontsize=10, verticalalignment='top',
-                        bbox=dict(facecolor='white', alpha=0.5))
-
-        # Polystyrene (second column of y)
-        axes[i, 1].scatter(y_test[:, 1], y_pred[:, 1], alpha=0.7)
-        axes[i, 1].plot([y_test[:, 1].min(), y_test[:, 1].max()], [y_test[:, 1].min(), y_test[:, 1].max()], 'k--', lw=2)
-        axes[i, 1].set_xlabel('Actual Polystyrene Concentration')
-        axes[i, 1].set_ylabel('Predicted Polystyrene Concentration')
-        axes[i, 1].set_title(f'{name} - Polystyrene')
-
-        # Add R² and MSE as text annotations
-        axes[i, 1].text(0.05, 0.9, f'R² = {r2_polystyrene:.4f}\nMSE = {mse_polystyrene:.4f}',
-                        transform=axes[i, 1].transAxes, fontsize=10, verticalalignment='top',
-                        bbox=dict(facecolor='white', alpha=0.5))
-
-    # Adjust layout and save the figure
+    # Adjust layout and save the plot
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig(out_path + r"\model_screening_concs_validation.png")
+    plt.savefig(os.path.join(out_path, "model_screening_concs_validation.png"))
+
+    return y_pred_new
 
 
 def send_message(conn, message_type, message_data=""):
@@ -1902,6 +1880,15 @@ if __name__ == "__main__":
     out = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\04-Nov three factor - toluene"
 
     a, b, c = ml_screening_multi(plate, data, volumes, out, plot_spectra=False, start_index=40, end_index=120)
+
+    verify_models(plate, data, volumes, out, a, c)
+
+    spectra_pca(separate_subtract_and_recombine(load_data_new(data), load_data_new(plate)).iloc[:, 1:],
+                3,
+                volumes=volumes.to_numpy(),
+                plot_data=True,
+                x_bounds=(220, 320),
+                out_path=out)
 
     # plate = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\Second run\241029_1243.csv"
     # data = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\Second run\241029_1339.csv"
