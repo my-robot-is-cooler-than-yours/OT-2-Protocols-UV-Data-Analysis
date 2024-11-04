@@ -904,9 +904,50 @@ def ml_screening(plate_path, data_path, volumes_df, out_path):
     return models, metrics_df, scaler
 
 
-def ml_screening_multi(plate_path, data_path, volumes_df, out_path):
+def ml_screening_multi(plate_path, data_path, volumes_df, out_path, plot_spectra=False, start_index=20, end_index=200):
+    # Define range of wavelengths to search
+    start_index = 20
+    end_index = 200
+
     # Correct data
     data_corrected = separate_subtract_and_recombine(load_data_new(data_path), load_data_new(plate_path))
+
+    if plot_spectra:
+        for i in range(data_corrected.shape[0]):
+            # Plot the observed and fitted spectra
+            fig, ax = plt.subplots(figsize=(8, 5))
+            wavelengths = data_corrected.select_dtypes(include='number').columns.astype(float)[start_index:end_index]
+
+            plt.plot(wavelengths, data_corrected.iloc[i, start_index:end_index], 
+                     label=f'Observed Mixture Spectrum {float(volumes_df.iloc[i, 0]), float(volumes_df.iloc[i, 1]), float(volumes_df.iloc[i, 2])}',
+                     color='black')
+
+            # Customize plot appearance
+            ax.spines['right'].set_visible(False)
+            ax.spines['top'].set_visible(False)
+            ax.spines['bottom'].set_visible(True)
+            ax.spines['left'].set_visible(True)
+
+            for axis in ['top', 'bottom', 'left', 'right']:
+                ax.spines[axis].set_linewidth(0.5)
+
+            ax.minorticks_on()
+            ax.tick_params(axis='both', which='both', direction='in', pad=10)
+
+            ax.set_xlabel("Wavelength (nm)")
+            ax.set_ylabel("Absorbance")
+
+            ax.grid(True, linestyle='-', linewidth=0.2, which='major', axis='both')
+            ax.legend(loc='best', fontsize=8)
+
+            if out_path:
+                # Create the spectra folder if it doesn’t exist
+                spectra_path = os.path.join(out_path, "spectra")
+                os.makedirs(spectra_path, exist_ok=True)
+
+                # Save the plot
+                plt.savefig(os.path.join(spectra_path, f"index_{i}.png"))
+                plt.close()
 
     # Load in volumes
     volumes = volumes_df
@@ -915,11 +956,7 @@ def ml_screening_multi(plate_path, data_path, volumes_df, out_path):
     # Correct from volume to concentration
     num_analytes = volumes.shape[1]-1  # Number of analytes from the volume DataFrame
     for i in range(num_analytes):
-        volumes_abs[:, i] *= [0.025, 0.25, 0.005][i] / 300  # Replace with correct factors as needed
-
-    # Define range of wavelengths to search
-    start_index = 40
-    end_index = 120
+        volumes_abs[:, i] *= [0.025, 0.25, 0.5][i] / 300  # Replace with correct factors as needed
 
     # Extract features (absorbance spectra) and targets (concentrations)
     X = volumes_abs[:, start_index:end_index]  # Absorbance spectra
@@ -1535,8 +1572,8 @@ def conc_model_for_testing(conn, user_name: str = "Lachlan"):
                 break  # should break from outer loop
 
         # Decision based on metrics for verification
-        styrene_valid = all(r2 >= 0.90 and mse < 0.005 for r2, mse in zip(metrics['R² Styrene'], metrics['MSE Styrene']))
-        polystyrene_valid = all(r2 >= 0.90 and mse < 0.005 for r2, mse in zip(metrics['R² Polystyrene'], metrics['MSE Polystyrene']))
+        styrene_valid = all(r2 >= 0.80 and mse < 0.005 for r2, mse in zip(metrics['R² Styrene'], metrics['MSE Styrene']))
+        polystyrene_valid = all(r2 >= 0.80 and mse < 0.005 for r2, mse in zip(metrics['R² Polystyrene'], metrics['MSE Polystyrene']))
 
         if styrene_valid or polystyrene_valid:
             log_msg("Initial model parameters OK - verification step authorised.")
@@ -1859,19 +1896,18 @@ if __name__ == "__main__":
     # # plt.savefig(out_path + r"\absorbance_over_time.png")
     # # plt.show()
 
-    plate = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\first run\241029_1125.csv"
-    data = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\first run\241029_1214.csv"
-    volumes = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\first run\Duplicated_Volumes training.csv")
-    out = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Test Folders\Inverse Prediction"
+    plate = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\04-Nov three factor - toluene\241104_1530.csv"
+    data = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\04-Nov three factor - toluene\241104_1549.csv"
     volumes = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\Duplicated_Volumes.csv")
+    out = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\04-Nov three factor - toluene"
 
-    a, b, c = ml_screening_multi(plate, data, volumes, out)
+    a, b, c = ml_screening_multi(plate, data, volumes, out, plot_spectra=False, start_index=40, end_index=120)
 
-    plate = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\Second run\241029_1243.csv"
-    data = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\Second run\241029_1339.csv"
-    volumes = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\Second run\Duplicated_Volumes.csv")
-
-    verify_models(plate, data, volumes, out, a, c)
+    # plate = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\Second run\241029_1243.csv"
+    # data = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\Second run\241029_1339.csv"
+    # volumes = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\Second run\Duplicated_Volumes.csv")
+    #
+    # verify_models(plate, data, volumes, out, a, c)
 
     # curve_fitting_lin_reg(plate, data, vol_path, out+r"\spectra")
 

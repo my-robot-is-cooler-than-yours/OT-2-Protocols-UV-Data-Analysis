@@ -5,61 +5,6 @@ from tkinter import Tk
 from tkinter import filedialog
 
 
-def run_ssh_command_deprecated():
-    """
-    Establishes an SSH connection to the Opentrons OT-2 and executes a protocol on the robot.
-    This function uses Paramiko for SSH connection and remote execution, allowing you to run
-    a protocol located on the OT-2.
-
-    This is a deprecated version of the SSH command function, using older techniques.
-
-    :return: None
-    """
-    # Replace these with your own details
-    hostname = ""  # Replace with your OT-2's IP address
-    username = ""  # OT-2 default username is 'root'
-    key_path = r""  # Path to your SSH private key
-    protocol_path = ""  # Path to your protocol on the OT-2
-
-    # If using a passphrase with your SSH key
-    key_passphrase = ""  # Replace with your SSH key passphrase or None if no passphrase
-
-    try:
-        # Create an SSH client
-        client = paramiko.SSHClient()
-
-        # Auto add the OT-2's host key
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-        # Load the private key
-        private_key = paramiko.RSAKey.from_private_key_file(key_path, password=key_passphrase)
-
-        # Connect to the OT-2
-        client.connect(hostname, username=username, pkey=private_key)
-
-        # Define the command you want to execute
-        command = f"opentrons_execute {protocol_path}"
-
-        # Run the command on the OT-2
-        stdin, stdout, stderr = client.exec_command(command)
-
-        # Read and print the command output and errors
-        output = stdout.read().decode()
-        errors = stderr.read().decode()
-
-        if output:
-            print(f"Output:\n{''.join(stdout.readlines())}")
-        if errors:
-            print(f"Errors:\n{errors}")
-
-    except Exception as e:
-        print(f"An error occurred: {e}")
-
-    finally:
-        # Close the SSH connection
-        client.close()
-
-
 def run_subprocess(protocol_path):
     """
     Uses the subprocess module to transfer a protocol file to the OT-2 using legacy SCP (Secure Copy Protocol).
@@ -158,14 +103,33 @@ def run_ssh_command(protocol_name):
         ssh.close()
 
 
+def get_file_path():
+    """
+    Prompt the user to select a file.
+
+    :return: Full path of the selected file.
+    """
+    root = Tk()
+    root.withdraw()  # Hide the main Tkinter window
+
+    while True:
+        # Prompt the user to select a file
+        file_name = filedialog.askopenfilename(title="Select a File")
+
+        if not file_name:
+            print("No file selected, please select a file.")
+        else:
+            break
+
+    root.quit()  # Close the Tkinter root window
+    return file_name
+
+
 if __name__ == "__main__":
-    filepath = filedialog.askdirectory(title="Select Output Folder")
-    file_name = filepath.split("/")[-1]
+    # file_path = get_file_path()
+    # file_name = get_file_path().split("/")[-1]
+    # print(file_name)
 
-    # First, transfer the protocol file to the OT-2 using SCP
-    # run_subprocess(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Honours Python Main\OT-2 Protocols\DoE + Monomers Experiment\Mixtures Expt - SSH.py")
-    run_subprocess(file_name)
+    run_subprocess(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Honours Python Main\OT-2 Protocols\DoE + Monomers Experiment\Mixtures Multivariable.py")
 
-    # Then, execute the protocol via SSH
-    # run_ssh_command("Mixtures Expt - SSH")
-    run_ssh_command(file_name)
+    # run_ssh_command("Mixtures Multivariable.py")

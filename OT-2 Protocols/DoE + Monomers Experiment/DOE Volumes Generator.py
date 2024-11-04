@@ -223,7 +223,8 @@ def gen_volumes_csv(out_path, num_samples=46, total_volume=300, step_size=20, nu
 
 
 if __name__ == "__main__":
-    df, csv_path = gen_volumes_csv(out_path=r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments", num_factors=3)
+    df, csv_path = gen_volumes_csv(out_path=r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments",
+                                   num_factors=3)
 
     # Dictionary to hold volumes for each column
     volumes_dict = {}
