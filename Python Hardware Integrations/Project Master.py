@@ -629,7 +629,7 @@ def spectra_pca(df: pd.DataFrame, num_components: int, volumes: np.ndarray, plot
     if plot_data:
         # Plot the first two principal components (scores)
         plt.figure()
-        scatter = plt.scatter(pca_scores[:, 0], pca_scores[:, 1], c=volumes[:, 0], cmap="viridis")
+        scatter = plt.scatter(pca_scores[:, 0], pca_scores[:, 1], c=volumes[:, 1], cmap="viridis")
         plt.xlabel('PC1')
         plt.ylabel('PC2')
         plt.title('PCA for Styrene/Toluene/Polystyrene Mixtures')
