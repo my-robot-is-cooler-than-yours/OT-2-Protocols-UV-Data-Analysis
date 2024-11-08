@@ -1205,6 +1205,75 @@ def run_ssh_command(protocol_name):
     return complete
 
 
+def check_stable_temp(conn,
+                      goal_temp: str,
+                      stabilization_time: float = 60,
+                      check_interval: float = 5,
+                      range_tolerance: float = 0.2,
+                      temps1=[],
+                      temps2=[],
+                      time_stamps=[],
+                      *args):
+    """
+    Checks that the plate reader heating plate is at a stable goal temperature for a period of time.
+
+    :param conn: Socket object used for plate reader comms
+    :param goal_temp: The goal temperature to be reached for a certain period of time
+    :param stabilization_time: The amount of time the temp is required to be stable for before proceeding
+    :param check_interval: The amount of time between temperature checks
+    :param range_tolerance: The tolerance (+/-) on the range that the temperature must be between
+    :param args:
+    :return:
+    """
+
+    # Calculate acceptable temperature range
+    target_min = float(goal_temp) - range_tolerance
+    target_max = float(goal_temp) + range_tolerance
+
+    # Initialize a counter for stable time
+    stable_time = 0
+
+    # Loop until current_temp reaches and stays within the specified range for the required period
+    while stable_time < stabilization_time:
+        log_msg("Requesting current temperature.")
+        send_message(conn, "GET_TEMP")
+
+        log_msg("Awaiting message from client.")
+        msg_type, msg_data = receive_message(conn)
+
+        if msg_type == "TEMPS":
+            log_msg(f"Temperature measurement complete.")
+
+            time_stamps.append(datetime.now())  # Add current timestamp for each measurement
+            log_msg("Timestamp saved")
+
+            log_msg(f"Temp1, Temp2: {msg_data}")
+
+            temp1 = int(msg_data.split(",")[0].strip()) / 10
+            temp2 = int(msg_data.split(",")[1].strip()) / 10
+
+            temps1.append(temp1)
+            temps2.append(temp2)
+            log_msg("Temperatures saved.")
+
+            current_temp = temp1  # Set to lower plate temp since upper plate runs hot
+
+            # Check if current_temp is within the target range
+            if target_min <= current_temp <= target_max:
+                stable_time += check_interval  # Increment stable time by check interval
+                log_msg(f"Temperature within range ({target_min} to {target_max}) for {stable_time} seconds.")
+            else:
+                stable_time = 0  # Reset stable time if out of range
+                log_msg(f"Temperature out of range; resetting stable time counter.")
+
+            # Wait before taking the next measurement
+            time.sleep(check_interval)
+
+    log_msg(f"Goal temperature of {goal_temp} has been reached and has been stable for {stable_time} seconds.")
+
+    return None
+
+
 def conc_model(conn, user_name: str = "Lachlan"):
     """
     For use in handle_client() function. Takes background & sample CSVs & generates ML model from corrected data.
@@ -1641,7 +1710,7 @@ def measurements_over_time(conn, user_name: str = "Lachlan"):
         while not upload_success:
             try:
                 log_msg("Uploading protocol to OT-2")
-                # run_subprocess(protocol_path)
+                run_subprocess(protocol_path)
                 log_msg("Upload complete")
                 upload_success = True
             except Exception as e:
@@ -1677,7 +1746,7 @@ def measurements_over_time(conn, user_name: str = "Lachlan"):
         data_paths = []
         time_stamps = []  # Store time stamps for each measurement
 
-        for i in range(7):
+        for i in range(6):
             log_msg("Requesting to run measurement protocol")
             send_message(conn, "RUN_PROTOCOL", "Empty Plate Reading")
 
@@ -1692,7 +1761,7 @@ def measurements_over_time(conn, user_name: str = "Lachlan"):
                 time_stamps.append(datetime.now())  # Add current timestamp for each measurement
                 log_msg("Data path saved")
 
-                if i < 7:  # Only wait if there are more measurements to be taken
+                if i < 6:  # Only wait if there are more measurements to be taken
                     log_msg("Sleeping for one hour")
                     time.sleep(600)  # sleep for 10 mins before measuring again
 
@@ -1703,10 +1772,11 @@ def measurements_over_time(conn, user_name: str = "Lachlan"):
             plate = load_data_new(plate_background_path)
             data = load_data_new(path)
 
-            corrected_array = separate_subtract_and_recombine(data, plate, 0).iloc[:25, 40].to_numpy()
+            corrected_array_260 = separate_subtract_and_recombine(data, plate, 0)[260][1:25].to_numpy()
+            corrected_array_282 = separate_subtract_and_recombine(data, plate, 0)[282][1:25].to_numpy()
 
-            average = np.average(corrected_array)
-            std = np.std(corrected_array)
+            average = np.average(corrected_array_260)
+            std = np.std(corrected_array_260)
 
             abs_std_dev.append((average, std))
 
@@ -1740,15 +1810,16 @@ def measurements_over_time(conn, user_name: str = "Lachlan"):
         plt.savefig(out_path + r"\absorbance_over_time.png")
         plt.show()
 
-        if True:
-            break
-
-        else:
-            break
+        break
 
     end_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    experiment_metadata["end_time"] = end_time
     log_msg(f"Experiment ended at {end_time}")
+
+    experiment_metadata["end_time"] = end_time
+    experiment_metadata["data_paths"] = data_paths
+    experiment_metadata["timestamps"] = [ts.strftime("%Y-%m-%d %H:%M:%S") for ts in time_stamps]
+    experiment_metadata["averages"] = averages
+    experiment_metadata["std_devs"] = std_devs
 
     # Save experiment metadata ensuring correct encoding
     with open(os.path.join(
@@ -1757,6 +1828,100 @@ def measurements_over_time(conn, user_name: str = "Lachlan"):
         json.dump(experiment_metadata, f, indent=4, ensure_ascii=False)
 
     log_msg("Metadata saved")
+
+
+def temperature_over_time(conn, user_name: str = "Lachlan"):
+    """
+    Takes measurements over time and plots absorbance at a given wavelength as a function of time between measurements.
+
+    :param conn: Socket object to facilitate connection to 32-bit client.
+    :param user_name: Name of the user running the experiment, obtained when handle_client() is run.
+    :return:
+    """
+    start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    start_temp = "25.0"
+    target_temp = "27.0"
+    step_size = 0.5
+    current_temp = 0
+
+    # Define paths for output data
+    log_msg("Select path for data output:")
+    out_path = get_output_path()
+
+    # Initialize lists for timestamps and temperatures
+    time_stamps = []
+    temps1 = []
+    temps2 = []
+
+    # Dictionary for experiment metadata
+    experiment_metadata = {
+        "user": user_name,
+        "start_time": start_time,
+        "output_path": out_path,
+        "temperature_steps": [],
+    }
+
+    # Start temperature setting and stabilization process
+    log_msg(f"Setting goal temperature to {start_temp}.")
+    send_message(conn, message_type="SET_TEMP", message_data=start_temp)
+
+    # Wait for stabilization at the starting temperature
+    check_stable_temp(conn, start_temp, stabilization_time=60, check_interval=5, range_tolerance=0.3,
+                      temps1=temps1, temps2=temps2, time_stamps=time_stamps)
+
+    ### Take measurement here
+
+    # Set new temp
+    current_temp = float(start_temp) + step_size
+
+    # Loop through stabilisation, temp setting, and measurements
+    while current_temp <= float(target_temp):
+        # Set and stabilize at each incremental temperature
+        log_msg(f"Setting goal temperature to {str(current_temp)}.")
+        send_message(conn, message_type="SET_TEMP", message_data=str(current_temp))
+
+        check_stable_temp(conn, current_temp, stabilization_time=30, check_interval=5, range_tolerance=0.2,
+                          temps1=temps1, temps2=temps2, time_stamps=time_stamps)
+
+        experiment_metadata["temperature_steps"].append({
+            "target_temperature": current_temp,
+            "temps1": temps1[-1],  # Last recorded value at this step
+            "temps2": temps2[-1],
+            "timestamp": time_stamps[-1].strftime("%Y-%m-%d %H:%M:%S")
+        })
+
+        ### Take measurement
+
+        current_temp += step_size  # Increment temperature
+
+    # Save data to JSON with structured metadata
+    json_file_path = os.path.join(out_path, f'temperature_data_{start_time.replace(":", "_")}.json')
+    experiment_metadata["end_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    experiment_metadata["timestamps"] = [ts.strftime("%Y-%m-%d %H:%M:%S") for ts in time_stamps]
+    experiment_metadata["temps1"] = temps1
+    experiment_metadata["temps2"] = temps2
+
+    with open(json_file_path, 'w', encoding='utf-8') as json_file:
+        json.dump(experiment_metadata, json_file, indent=4)
+
+    log_msg(f"Data saved to {json_file_path}")
+
+    # Plotting
+    times = [(t - time_stamps[0]).total_seconds() / 60 for t in time_stamps]  # Minutes from start
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(times, temps1, label='Heating Plate 1 Temperature')
+    ax.plot(times, temps2, label='Heating Plate 2 Temperature')
+    ax.set_xlabel('Time (minutes)')
+    ax.set_ylabel('Temperature')
+    ax.set_title('Heating Plate Temperature Over Time')
+    ax.legend(loc='best')
+    ax.grid(True, linestyle='-', linewidth=0.2, which='major', axis='both')
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_path, "plate_temp_over_time.png"))
+    plt.show()
+
+    log_msg("Experiment ended and plot saved.")
 
 
 @timeit
@@ -1771,8 +1936,9 @@ def handle_client(conn):
             choice = input(">>> Enter workflow number: "
                            "\n1. Conc Model "
                            "\n2. Test Conc Model "
-                           "\n3. Measurements Over Time "
-                           "\n4. Shutdown "
+                           "\n3. Temp Over Time "
+                           "\n4. Evaporation Over Time "
+                           "\n5. Shutdown "
                            "\n>>> "
                            )
 
@@ -1783,9 +1949,12 @@ def handle_client(conn):
                 conc_model_for_testing(conn, user_name)
 
             if choice == "3":
-                measurements_over_time(conn, user_name)
+                temperature_over_time(conn, user_name)
 
             if choice == "4":
+                measurements_over_time(conn, user_name)
+
+            if choice == "5":
                 send_message(conn, "SHUTDOWN")
                 break
 
@@ -1818,7 +1987,7 @@ def server_main():
 
 
 if __name__ == "__main__":
-    # server_main()
+    server_main()
 
     ### Evaporation Over Time Code
     # data_paths = [r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Evaporation\300 uL Open to Air Auto 30-Oct\241030_1535.csv",
@@ -1874,21 +2043,25 @@ if __name__ == "__main__":
     # # plt.savefig(out_path + r"\absorbance_over_time.png")
     # # plt.show()
 
-    plate = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\04-Nov three factor - toluene\241104_1530.csv"
-    data = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\04-Nov three factor - toluene\241104_1549.csv"
-    volumes = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\Duplicated_Volumes.csv")
-    out = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\04-Nov three factor - toluene"
+    ################
 
-    a, b, c = ml_screening_multi(plate, data, volumes, out, plot_spectra=False, start_index=40, end_index=120)
+    # plate = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\04-Nov three factor - toluene\241104_1530.csv"
+    # data = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\04-Nov three factor - toluene\241104_1549.csv"
+    # volumes = load_data(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\Duplicated_Volumes.csv")
+    # out = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\04-Nov three factor - toluene"
+    #
+    # a, b, c = ml_screening_multi(plate, data, volumes, out, plot_spectra=False, start_index=40, end_index=120)
+    #
+    # verify_models(plate, data, volumes, out, a, c)
+    #
+    # spectra_pca(separate_subtract_and_recombine(load_data_new(data), load_data_new(plate)).iloc[:, 1:],
+    #             3,
+    #             volumes=volumes.to_numpy(),
+    #             plot_data=True,
+    #             x_bounds=(220, 320),
+    #             out_path=out)
 
-    verify_models(plate, data, volumes, out, a, c)
-
-    spectra_pca(separate_subtract_and_recombine(load_data_new(data), load_data_new(plate)).iloc[:, 1:],
-                3,
-                volumes=volumes.to_numpy(),
-                plot_data=True,
-                x_bounds=(220, 320),
-                out_path=out)
+    ################
 
     # plate = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\Second run\241029_1243.csv"
     # data = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Automated Testing\29-Oct Full Auto buoac\no mixing because i was scared\Second run\241029_1339.csv"

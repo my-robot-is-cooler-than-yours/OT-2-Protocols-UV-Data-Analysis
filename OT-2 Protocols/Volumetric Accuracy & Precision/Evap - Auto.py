@@ -75,11 +75,20 @@ def run(protocol: protocol_api.ProtocolContext):
         plate_wells.extend(row1)  # Add wells from the current row of slot 4 definition
         plate_wells.extend(row2)  # Add wells from the current row of slot 7 definition
 
+    protocol.comment("Adding solvent to first well")
+    right_pipette.distribute(
+        volume=300,
+        source=reservoirs[0].wells()[0],
+        dest=plate_wells[0],
+        blow_out=True,
+        blowout_location="source well"
+    )
+
     protocol.comment("Adding styrene to wells")
     right_pipette.distribute(
         volume=300,
         source=reservoirs[0].wells()[-1],
-        dest=[well.top() for well in plate_wells[:25]],
+        dest=[well.top() for well in plate_wells[1:25]],
         blow_out=True,
         blowout_location="source well"
     )
