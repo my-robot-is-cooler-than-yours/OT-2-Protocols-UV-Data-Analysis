@@ -1858,7 +1858,7 @@ def temperature_over_time(conn, user_name: str = "Lachlan"):
     log_msg("Select path for data output:")
     out_path = get_output_path()
 
-    # protocol_name = "Mixtures Expt - SSH"
+    # Define protocol name for sample dispensing
     log_msg("Select path for protocol upload:")
     protocol_path = get_file_path()
     protocol_name = protocol_path.split("/")[-1]
@@ -1873,7 +1873,7 @@ def temperature_over_time(conn, user_name: str = "Lachlan"):
 
     # Plate background and sample preparation steps
 
-    log_msg("Plate background is required to be taken before proceeding")
+    log_msg("Plate background is required to be taken before proceeding.")
 
     while True:
         user_input = input(">>> Has empty plate been prepared and ready to be inserted? (yes/no): \n>>> ")
@@ -1882,50 +1882,50 @@ def temperature_over_time(conn, user_name: str = "Lachlan"):
         else:
             log_msg("Waiting for plate preparation...")
 
-    log_msg("Requesting plate background from reader")
+    log_msg("Collecting plate background from reader.")
     send_message(conn, "PLATE_BACKGROUND", "Empty Plate Reading")
 
-    log_msg("Awaiting message from client")
+    log_msg("Awaiting update from client.")
     msg_type, msg_data = receive_message(conn)
 
     if msg_type == "PLATE_BACKGROUND":
-        log_msg("Plate background data received")
+        log_msg("Plate background data received.")
 
         # Save plate bg to variable
         plate_background_path = msg_data
-        log_msg("Plate background path saved")
+        log_msg(f"Plate background saved to {plate_background_path}.")
 
     upload_success = False
     while not upload_success:
         try:
-            log_msg("Uploading protocol to OT-2")
-            run_subprocess(protocol_path)
-            log_msg("Upload complete")
+            log_msg("Uploading protocol to OT-2.")
+            # run_subprocess(protocol_path)
+            log_msg("Upload complete.")
             upload_success = True
         except Exception as e:
             log_msg(f"Error uploading protocol: {e}")
             user_input = input(">>> Retry upload? (yes/no): \n>>> ")
             if user_input.lower() != "yes":
-                log_msg("Upload cancelled by user")
+                log_msg("Upload cancelled by user.")
                 break
 
     # Make robot prepare samples
-    log_msg("Please allow robot to prepare samples before proceeding")
-
     # SSH into OT-2 and run opentrons_execute command
-    log_msg(f"SSh'ing into OT-2 and running opentrons_execute command on protocol {protocol_name}")
-    output = run_ssh_command(protocol_name)
+    log_msg(f"SSH'ing into OT-2 and running opentrons_execute command on protocol {protocol_name}.")
+    log_msg(f"Please allow OT-2 to finalise protocol before making any changes.")
+    # output = run_ssh_command(protocol_name)
+    output= True
 
     # Wait for robot confirmation that run is complete
     while True:
         # Check for the phrase "Protocol Finished" in shell output
         if output:
-            log_msg("OT-2 protocol finished, proceeding")
+            log_msg("OT-2 protocol complete.")
             break
 
         else:
-            log_msg("OT-2 either not finished protocol or error has occurred")
-            user_input = input(">>> Proceed manually? \n>>> ")
+            log_msg("OT-2 has either not finished protocol or an error has occurred.")
+            user_input = input(">>> Proceed manually? (yes/no) \n>>> ")
             if user_input.lower() == "yes":
                 break
             else:
@@ -1936,33 +1936,37 @@ def temperature_over_time(conn, user_name: str = "Lachlan"):
     send_message(conn, message_type="SET_TEMP", message_data=start_temp)
 
     # Wait for stabilization at the starting temperature
-    check_stable_temp(conn, start_temp, stabilization_time=60, check_interval=5, range_tolerance=0.3,
+    check_stable_temp(conn, start_temp, stabilization_time=60, check_interval=3, range_tolerance=0.3,
                       temps1=temps1, temps2=temps2, time_stamps=time_stamps)
 
     # Take first reading for start_temp
-    log_msg("Requesting to run measurement protocol")
+    log_msg("Collecting absorbance data from plate reader.")
     send_message(conn, "RUN_PROTOCOL", "Empty Plate Reading")
 
-    log_msg("Awaiting message from client")
-    msg_type, msg_data = receive_message(conn)
+    log_msg("Awaiting update from plate reader.")
+    while True:
+        msg_type, msg_data = receive_message(conn)
+        if msg_type == "CSV_FILE":
+            log_msg("Data received.")
+            break
+        else:
+            log_msg("Yet to receive data.")
+            time.sleep(5)
 
-    if msg_type == "CSV_FILE":
-        log_msg(f"Measurement complete")
-        log_msg(f"Received CSV file with path: {msg_data}")
+    log_msg(f"Measurement complete. Received CSV file with path: {msg_data}.")
 
-        data_paths.append(msg_data)
-        time_stamps.append(datetime.now())  # Add current timestamp for each measurement
-        measurement_times.append(datetime.now())
-        log_msg("Data path saved")
+    data_paths.append(msg_data)
+    measurement_times.append(datetime.now())
+    log_msg("Data path saved.")
 
-        temps1_plotting.append(25.0)
-        temps2_plotting.append(25.0)
-        log_msg("Temperature data saved")
+    temps1_plotting.append(25.0)
+    temps2_plotting.append(25.0)
+    log_msg("Temperature data saved.")
 
     # Set new temp
     current_temp = float(start_temp) + step_size
 
-    # Loop through stabilisation, temp setting, and measurements
+    # Loop through stabilisation, temp setting, and measurement steps to obtain abs/temp/time data until target_temp reached
     while current_temp <= float(target_temp):
         # Set and stabilize at each incremental temperature
         log_msg(f"Setting goal temperature to {str(current_temp)}.")
@@ -1979,42 +1983,66 @@ def temperature_over_time(conn, user_name: str = "Lachlan"):
         })
 
         # Allow five minutes for plate to reach current temp
-        time.sleep(secs=5 * 60)
+        # time.sleep(secs=5 * 60)
+        log_msg("plate reaching temp...")
+        log_msg("OK")
 
         # Take reading for current temp
         log_msg("Requesting to run measurement protocol")
         send_message(conn, "RUN_PROTOCOL", "Empty Plate Reading")
 
         log_msg("Awaiting message from client")
-        msg_type, msg_data = receive_message(conn)
 
-        if msg_type == "CSV_FILE":
-            log_msg(f"Measurement complete")
-            log_msg(f"Received CSV file with path: {msg_data}")
+        while True:
+            msg_type, msg_data = receive_message(conn)
+            if msg_type == "CSV_FILE":
+                log_msg("Data received.")
+                break
+            else:
+                log_msg("Yet to receive data.")
+                time.sleep(5)
 
-            data_paths.append(msg_data)
-            time_stamps.append(datetime.now())  # Add current timestamp for each measurement
-            log_msg("Data path saved")
+        log_msg(f"Measurement complete")
+        log_msg(f"Received CSV file with path: {msg_data}")
 
-            temps1_plotting.append(temps1[-1])
-            temps2_plotting.append(temps2[-1])
-            log_msg("Temperature data saved")
+        data_paths.append(msg_data)
+        time_stamps.append(datetime.now())  # Add current timestamp for each measurement
+        log_msg("Data path saved")
+
+        temps1_plotting.append(temps1[-1])
+        temps2_plotting.append(temps2[-1])
+        log_msg("Temperature data saved")
 
         current_temp += step_size  # Increment temperature
 
     # Calculate averages and standard deviations
     abs_std_dev = []
 
+    transmittance_dir = os.path.join(out_path, 'transmittance spectra')
+    os.makedirs(transmittance_dir, exist_ok=True)  # Create the directory if it doesn't exist
+
     for path in data_paths:
         plate = load_data_new(plate_background_path)
         data = load_data_new(path)
 
-        corrected_array = separate_subtract_and_recombine(data, plate, 0)[600][1:13].to_numpy() # only 600 nm from wells 2-12
+        corrected_array = separate_subtract_and_recombine(data, plate, 0)[600][
+                          1:13].to_numpy()  # only 600 nm from wells 2-12
+        try:
+            # Convert absorbance to percentage transmittance
+            transmittance_array = 10 ** (-corrected_array) * 100
 
-        average = np.average(corrected_array)
-        std = np.std(corrected_array)
+            # Save the transmittance data to CSV
+            transmittance_df = pd.DataFrame(transmittance_array)
+            transmittance_filename = os.path.join(transmittance_dir, f"transmittance_{os.path.basename(path)}")
+            transmittance_df.to_csv(transmittance_filename, index=False)
 
-        abs_std_dev.append((average, std))
+            # Calculate average and standard deviation for transmittance data
+            average = np.average(transmittance_array)
+            std = np.std(transmittance_array)
+
+            abs_std_dev.append((average, std))
+        except Exception as e:
+            print(f"Error occurred: {e}")
 
     # Extract averages, standard deviations, and times for plotting
     averages = [item[0] for item in abs_std_dev]
@@ -2030,8 +2058,8 @@ def temperature_over_time(conn, user_name: str = "Lachlan"):
 
     # Add labels and titles
     ax.set_xlabel("Temperature of Lower Heating Plate " + "("+u'\u2103'+")")
-    ax.set_ylabel('Average Absorbance')
-    ax.set_title('Absorbance at 600 nm of p(NIPAM) in Water versus Temperature')
+    ax.set_ylabel('Average % Transmittance')
+    ax.set_title('% Transmittance at 500 nm of p(NIPAM) in Water versus Temperature')
 
     # Show grid, legend, and layout adjustments
     ax.grid(True)
@@ -2139,6 +2167,73 @@ def server_main():
 
 if __name__ == "__main__":
     server_main()
+
+    ### Transmittance/temperature test
+    # plate_background_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\11-Nov with abs_trans measurements\Initial (failed)\241111_1150.csv"
+    # data_paths = [r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\11-Nov with abs_trans measurements\Initial (failed)\241111_1156.csv",
+    #               r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\11-Nov with abs_trans measurements\Initial (failed)\241111_1200.csv",
+    #               r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\11-Nov with abs_trans measurements\Initial (failed)\241111_1205.csv",
+    #               r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\11-Nov with abs_trans measurements\Initial (failed)\241111_1210.csv",
+    #               r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\11-Nov with abs_trans measurements\Initial (failed)\241111_1216.csv"
+    # ]
+    # temps1_plotting = [25, 25.5, 26, 26.5, 27]
+    # temps1_plotting = [25.5, 26, 26.5, 27, 27.5]
+    #
+    # out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\11-Nov with abs_trans measurements\Initial (failed)"
+    #
+    # # Calculate averages and standard deviations
+    # abs_std_dev = []
+    #
+    # transmittance_dir = os.path.join(out_path, 'transmittance spectra')
+    # os.makedirs(transmittance_dir, exist_ok=True)  # Create the directory if it doesn't exist
+    #
+    # for path in data_paths:
+    #     plate = load_data_new(plate_background_path)
+    #     data = load_data_new(path)
+    #
+    #     corrected_array = separate_subtract_and_recombine(data, plate, 0)[600][
+    #                       1:13].to_numpy()  # only 600 nm from wells 2-12
+    #     try:
+    #         # Convert absorbance to percentage transmittance
+    #         transmittance_array = 10 ** (-corrected_array) * 100
+    #
+    #         # Save the transmittance data to CSV
+    #         transmittance_df = pd.DataFrame(transmittance_array)
+    #         transmittance_filename = os.path.join(transmittance_dir, f"transmittance_{os.path.basename(path)}")
+    #         transmittance_df.to_csv(transmittance_filename, index=False)
+    #
+    #         # Calculate average and standard deviation for transmittance data
+    #         average = np.average(transmittance_array)
+    #         std = np.std(transmittance_array)
+    #
+    #         abs_std_dev.append((average, std))
+    #     except Exception as e:
+    #         print(f"Error occurred: {e}")
+    #
+    # # Extract averages, standard deviations, and times for plotting
+    # averages = [item[0] for item in abs_std_dev]
+    # std_devs = [item[1] for item in abs_std_dev]
+    # # times = [(t - time_stamps[0]).total_seconds() / 60 for t in time_stamps]  # Minutes from start
+    #
+    # # Create a figure and axis
+    # fig, ax = plt.subplots(figsize=(10, 6))
+    #
+    # # Plot data with error bars for standard deviation
+    # ax.errorbar(temps1_plotting, averages, yerr=std_devs, fmt='-o', ecolor='gray', capsize=5)
+    # ax.plot(temps1_plotting, averages, 'o-', label='Average Absorbance')
+    #
+    # # Add labels and titles
+    # ax.set_xlabel("Temperature of Lower Heating Plate " + "("+u'\u2103'+")")
+    # ax.set_ylabel('Average % Transmittance')
+    # ax.set_title('% Transmittance at 500 nm of p(NIPAM) in Water versus Temperature')
+    #
+    # # Show grid, legend, and layout adjustments
+    # ax.grid(True)
+    # plt.tight_layout()
+    # plt.savefig(out_path + r"\abs_versus_temp.png")
+    # # plt.show()
+    # plt.close()
+    ###
 
     ### Evaporation Over Time Code
     # data_paths = [r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Evaporation\300 uL Open to Air Auto 30-Oct\241030_1535.csv",
