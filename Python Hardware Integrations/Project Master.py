@@ -1899,7 +1899,7 @@ def temperature_over_time(conn, user_name: str = "Lachlan"):
     while not upload_success:
         try:
             log_msg("Uploading protocol to OT-2.")
-            # run_subprocess(protocol_path)
+            run_subprocess(protocol_path)
             log_msg("Upload complete.")
             upload_success = True
         except Exception as e:
@@ -1913,8 +1913,7 @@ def temperature_over_time(conn, user_name: str = "Lachlan"):
     # SSH into OT-2 and run opentrons_execute command
     log_msg(f"SSH'ing into OT-2 and running opentrons_execute command on protocol {protocol_name}.")
     log_msg(f"Please allow OT-2 to finalise protocol before making any changes.")
-    # output = run_ssh_command(protocol_name)
-    output= True
+    output = run_ssh_command(protocol_name)
 
     # Wait for robot confirmation that run is complete
     while True:
@@ -2101,6 +2100,219 @@ def temperature_over_time(conn, user_name: str = "Lachlan"):
     log_msg(f"Data saved to {json_file_path}")
 
     log_msg("Experiment ended and plot saved.")
+
+
+def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
+    """
+    Takes measurements over time and plots absorbance at a given wavelength as a function of time between measurements.
+
+    :param conn: Socket object to facilitate connection to 32-bit client.
+    :param user_name: Name of the user running the experiment, obtained when handle_client() is run.
+    :return:
+    """
+    start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    start_temp = 25.0
+    target_temp = 27.0
+    step_size = 0.5
+    current_temp = start_temp
+
+    # Initialize lists for timestamps and temperatures
+    time_stamps = []
+    measurement_times = []
+    temps1 = []
+    temps1_plotting = []
+    temps2 = []
+    temps2_plotting = []
+    data_paths = []
+
+    log_msg("Select path for data output:")
+    out_path = get_output_path()
+
+    log_msg("Select path for protocol upload:")
+    protocol_path = get_file_path()
+    protocol_name = protocol_path.split("/")[-1]
+
+    experiment_metadata = {
+        "user": user_name,
+        "start_time": start_time,
+        "output_path": out_path,
+        "temperature_steps": [],
+    }
+
+    log_msg("Plate background is required to be taken before proceeding.")
+
+    while True:
+        user_input = input(">>> Has empty plate been prepared and ready to be inserted? (yes/no): \n>>> ")
+        if user_input.lower() == "yes":
+            break
+        else:
+            log_msg("Waiting for plate preparation...")
+
+    log_msg("Collecting plate background from reader.")
+    send_message(conn, "PLATE_BACKGROUND", "Empty Plate Reading")
+
+    try:
+        msg_type, msg_data = receive_message(conn)
+        if msg_type == "PLATE_BACKGROUND":
+            log_msg("Plate background data received.")
+            plate_background_path = msg_data
+            log_msg(f"Plate background saved to {plate_background_path}.")
+    except Exception as e:
+        log_msg(f"Error receiving plate background: {e}")
+        return
+
+    upload_success = False
+    while not upload_success:
+        try:
+            log_msg("Uploading protocol to OT-2.")
+            run_subprocess(protocol_path)
+            log_msg("Upload complete.")
+            upload_success = True
+        except Exception as e:
+            log_msg(f"Error uploading protocol: {e}")
+            user_input = input(">>> Retry upload? (yes/no): \n>>> ")
+            if user_input.lower() != "yes":
+                log_msg("Upload cancelled by user.")
+                return
+
+    # Make robot prepare samples
+    # SSH into OT-2 and run opentrons_execute command
+    log_msg(f"SSH'ing into OT-2 and running opentrons_execute command on protocol {protocol_name}.")
+    log_msg(f"Please allow OT-2 to finalise protocol before making any changes.")
+    output = run_ssh_command(protocol_name)
+
+    # Wait for robot confirmation that run is complete
+    while True:
+        # Check for the phrase "Protocol Finished" in shell output
+        if output:
+            log_msg("OT-2 protocol complete.")
+            break
+
+        else:
+            log_msg("OT-2 has either not finished protocol or an error has occurred.")
+            user_input = input(">>> Proceed manually? (yes/no) \n>>> ")
+            if user_input.lower() == "yes":
+                break
+            else:
+                pass
+
+    log_msg("Starting temperature adjustment protocol.")
+
+    def stabilize_and_measure(temp):
+        """Stabilizes at the specified temperature and collects data."""
+        log_msg(f"Setting goal temperature to {temp}.")
+        send_message(conn, message_type="SET_TEMP", message_data=str(temp))
+
+        check_stable_temp(conn, temp, stabilization_time=30, check_interval=5, range_tolerance=0.2,
+                          temps1=temps1, temps2=temps2, time_stamps=time_stamps)
+
+        experiment_metadata["temperature_steps"].append({
+            "target_temperature": temp,
+            "temps1": temps1[-1],
+            "temps2": temps2[-1],
+            "timestamp": time_stamps[-1].strftime("%Y-%m-%d %H:%M:%S")
+        })
+
+        log_msg("Requesting to run measurement protocol.")
+        send_message(conn, "RUN_PROTOCOL", "Empty Plate Reading")
+
+        while True:
+            msg_type, msg_data = receive_message(conn)
+            if msg_type == "CSV_FILE":
+                log_msg("Data received.")
+                data_paths.append(msg_data)
+                measurement_times.append(datetime.now())
+                temps1_plotting.append(temps1[-1])
+                temps2_plotting.append(temps2[-1])
+                log_msg("Temperature and data path saved.")
+                break
+            else:
+                log_msg("Yet to receive data.")
+                time.sleep(5)
+
+    # Step through temperatures up to target_temp
+    try:
+        while current_temp <= target_temp:
+            stabilize_and_measure(current_temp)
+            current_temp += step_size
+
+        # Step through temperatures down to start_temp
+        current_temp = target_temp - step_size
+        while current_temp >= start_temp:
+            stabilize_and_measure(current_temp)
+            current_temp -= step_size
+    except Exception as e:
+        log_msg(f"Error during temperature measurement steps: {e}")
+        return
+
+    # Post-process data to calculate transmittance and plot results
+    abs_std_dev = []
+    transmittance_dir = os.path.join(out_path, 'transmittance spectra')
+    os.makedirs(transmittance_dir, exist_ok=True)
+
+    for path in data_paths:
+        try:
+            plate = load_data_new(plate_background_path)
+            data = load_data_new(path)
+            corrected_array = separate_subtract_and_recombine(data, plate, 0)[600][1:13].to_numpy()
+
+            transmittance_array = 10 ** (-corrected_array) * 100
+            transmittance_df = pd.DataFrame(transmittance_array)
+            transmittance_filename = os.path.join(transmittance_dir, f"transmittance_{os.path.basename(path)}")
+            transmittance_df.to_csv(transmittance_filename, index=False)
+
+            average = np.average(transmittance_array)
+            std = np.std(transmittance_array)
+            abs_std_dev.append((average, std))
+        except Exception as e:
+            log_msg(f"Error processing path {path}: {e}")
+
+    # Extract averages and standard deviations for plotting
+    averages = [item[0] for item in abs_std_dev]
+    std_devs = [item[1] for item in abs_std_dev]
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.errorbar(temps1_plotting, averages, yerr=std_devs, fmt='-o', ecolor='gray', capsize=5)
+    ax.plot(temps1_plotting, averages, 'o-', label='Average % Transmittance')
+    ax.set_xlabel("Temperature of Lower Heating Plate (°C)")
+    ax.set_ylabel('Average % Transmittance')
+    ax.set_title('% Transmittance at 500 nm of p(NIPAM) in Water versus Temperature')
+    ax.grid(True)
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_path, "abs_versus_temp.png"))
+    plt.close()
+
+    # Plotting temperature over time
+    times = [(t - time_stamps[0]).total_seconds() / 60 for t in time_stamps]
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(times, temps1, label='Heating Plate 1 Temperature')
+    ax.plot(times, temps2, label='Heating Plate 2 Temperature')
+    ax.set_xlabel('Time (minutes)')
+    ax.set_ylabel('Temperature')
+    ax.set_title('Heating Plate Temperature Over Time')
+    ax.legend(loc='best')
+    ax.grid(True)
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_path, "plate_temp_over_time.png"))
+    plt.close()
+
+    json_file_path = os.path.join(out_path, f'temperature_data_{start_time.replace(":", "_")}.json')
+    experiment_metadata["end_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    experiment_metadata["timestamps"] = [ts.strftime("%Y-%m-%d %H:%M:%S") for ts in time_stamps]
+    experiment_metadata["measurement_timestamps"] = [ts.strftime("%Y-%m-%d %H:%M:%S") for ts in measurement_times]
+    experiment_metadata["temps1"] = temps1
+    experiment_metadata["temps1_plotted"] = temps1_plotting
+    experiment_metadata["temps2"] = temps2
+    experiment_metadata["temps2_plotted"] = temps2_plotting
+    experiment_metadata["averages"] = averages
+    experiment_metadata["std_devs"] = std_devs
+
+    with open(json_file_path, 'w', encoding='utf-8') as json_file:
+        json.dump(experiment_metadata, json_file, indent=4)
+
+    log_msg(f"Data saved to {json_file_path}")
+    log_msg("Experiment ended and plots saved.")
 
 
 @timeit
