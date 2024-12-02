@@ -2369,40 +2369,20 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
             average = np.average(transmittance_array[1:4])
             std = np.std(transmittance_array[1:4])
             abs_std_dev.append((average, std))
-
-            # Concatenate all transmittance data into a single DataFrame
-            stacked_transmittance_df = pd.concat(trans_dfs, axis=1)
-
-            # Save the combined transmittance DataFrame
-            stacked_filename = os.path.join(transmittance_dir, "stacked_transmittance.csv")
-            stacked_transmittance_df.to_csv(stacked_filename, index=False)
-
-            # Extract averages and standard deviations for plotting
-            averages = [item[0] for item in abs_std_dev]
-            std_devs = [item[1] for item in abs_std_dev]
         except Exception as e:
             log_msg(f"Error processing path {path}: {e}")
 
-    # # Move paths
-    # try:
-    #     # Destination directory
-    #     destination_dir = out_path
-    #
-    #     # Ensure the destination directory exists
-    #     os.makedirs(destination_dir, exist_ok=True)
-    #
-    #     # Loop through the paths and move each file
-    #     for path in data_paths:
-    #         if os.path.isfile(path):  # Check if the path points to a file
-    #             try:
-    #                 shutil.move(path, destination_dir)
-    #                 print(f"Moved {path} to {destination_dir}")
-    #             except Exception as e:
-    #                 print(f"Failed to move {path}. Error: {e}")
-    #         else:
-    #             print(f"{path} does not exist or is not a file.")
-    # except Exception as e:
-    #     print(e)
+    # Concatenate all transmittance data into a single DataFrame
+    stacked_transmittance_df = pd.concat(trans_dfs, axis=1)
+
+    # Save the combined transmittance DataFrame
+    stacked_filename = os.path.join(transmittance_dir, "stacked_transmittance.csv")
+    stacked_transmittance_df.to_csv(stacked_filename, index=False)
+
+    # Extract averages and standard deviations for plotting
+    averages = [item[0] for item in abs_std_dev]
+    std_devs = [item[1] for item in abs_std_dev]
+
 
     def first_below_threshold_index(row):
         # Iterate over the row with index and return the first index where value < threshold
@@ -2410,6 +2390,7 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
             if value < 50:
                 return idx
         return None  # Return None if no values are below the threshold in the row
+
 
     try:
         # Apply the function to each row in stacked_transmittance_df
@@ -2434,34 +2415,6 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
                 print(f"Row {idx}: Transmittance = {transmittance_value}, Temperature = {temperature}°C")
             else:
                 print(f"Row {idx}: No transmittance values below threshold")
-    except Exception as e:
-        print(e)
-
-    ## Plot conc vs t50
-    # Filter out None values for plotting
-    temperature_values_filtered = [temp for temp in temperature_values if temp is not None]
-    concentrations_filtered = [conc for temp, conc in zip(temperature_values, concentrations) if temp is not None]
-
-    # Plot concentration vs. temperature where transmittance first drops below the threshold
-    try:
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.scatter(concentrations_filtered, temperature_values_filtered, marker="o", color="#41424C", s=60)
-
-        # Customize axis labels and title with appropriate fonts
-        ax.set_xlabel("Concentration (mg/mL)", fontsize=14, labelpad=10)
-        ax.set_ylabel("Temperature (°C) at <50% Transmittance", fontsize=14, labelpad=10)
-        ax.set_title("Temperature at First <50% Transmittance vs. Concentration", fontsize=16, pad=15)
-
-        # Adjust tick parameters for readability
-        ax.tick_params(axis='both', which='both', labelsize=12, width=1, length=5)
-
-        # Add grid with lighter color for minimal interference with data points
-        ax.grid(False)
-
-        # Apply tight layout to avoid clipping
-        plt.tight_layout()
-        plt.savefig(os.path.join(out_path, "temp_at_50_transmittance_vs_concentration.png"), dpi=300)
-        plt.close()
     except Exception as e:
         print(e)
 
@@ -2572,6 +2525,7 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
     # Load your data here
     temperature = temps1_plotting[:len(temps1_plotting) // 2]
     transmittance = stacked_transmittance_df
+    inflection_temps = []
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -2592,6 +2546,7 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
             dy_dx = np.gradient(fitted_transmittance, x_fine)
             inflection_index = np.argmin(dy_dx)
             inflection_temp = x_fine[inflection_index]
+            inflection_temps.append(inflection_temp)
 
             # ax.plot(x_fine, dy_dx, linewidth=1.5, linestyle='--', color="#41424C", alpha=0.5)
 
@@ -2625,6 +2580,227 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
     plt.tight_layout()
     plt.savefig(os.path.join(out_path, "sigmoidal_fit_transmittance.png"), dpi=300)  # Save high-DPI image
 
+    # # Hysteresis trans (second half)
+    temperature = temps1_plotting[len(temps1_plotting) // 2:]
+    transmittance = stacked_transmittance_df
+    hysteresis_inflection_temps = []
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    for i, (index, row) in enumerate(transmittance.iterrows()):
+
+        # Initial guess and bounds
+        p0 = [np.max(row[len(temperature):]), np.min(row[len(temperature):]), np.mean(temperature), 1.0]
+        bounds = ([0, 0, min(temperature), 0.1], [110, 110, max(temperature), 10])
+
+        try:
+            # Fit the curve
+            popt, pcov = curve_fit(sigmoidal, temperature, row.values[len(row) - len(temperature):], p0=p0,
+                                   bounds=bounds)
+            A1, A2, x0, dx = popt
+
+            # Generate fitted curve and find inflection point
+            x_fine = np.linspace(min(temperature), max(temperature), 500)
+            fitted_transmittance = sigmoidal(x_fine, *popt)
+            dy_dx = np.gradient(fitted_transmittance, x_fine)
+            inflection_index = np.argmin(dy_dx)
+            inflection_temp = x_fine[inflection_index]
+            hysteresis_inflection_temps.append(inflection_temp)
+
+            # Plot the fitted curve
+            ax.plot(x_fine, fitted_transmittance, linewidth=1.5, linestyle='--', color="red", alpha=0.5)
+            ax.axvline(inflection_temp, color="green", linestyle="--", linewidth=1, alpha=0.5,
+                       label=f'Inflection Point: {inflection_temp: .1f} °C')
+
+            ax.plot(temperature, row.values[len(row) - len(temperature):], 'o-', markersize=6, linewidth=1.5)
+
+        except (RuntimeError, ValueError) as e:
+            print(f"Curve fitting failed for dataset {i}: {e}")
+            continue
+
+    # Customize axis labels and title
+    ax.set_xlabel("Temperature (°C)", fontsize=14, labelpad=10)
+    ax.set_ylabel("Average Transmittance (%)", fontsize=14, labelpad=10)
+    ax.set_title("Fitted Curves for Hysteresis Transmittance vs. Temperature at 0.50 mg/mL", fontsize=16, pad=15)
+
+    # Adjust ticks and add minor locators
+    ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.tick_params(axis='both', which='both', labelsize=12, width=1, length=5)
+
+    # Add legend
+    ax.legend(loc='best', fontsize=12, frameon=False)
+
+    # Disable grid
+    ax.grid(False)
+
+    # Apply tight layout
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_path, "sigmoidal_fit_hysteresis_transmittance.png"), dpi=300)  # Save high-DPI image
+
+    ## Plot conc vs t50
+    # Filter out None values for plotting
+    temperature_values_filtered = [temp for temp in inflection_temps[4:] if temp is not None]
+    concentrations_filtered = [conc for temp, conc in zip(inflection_temps[4:], concentrations) if temp is not None]
+
+    print(len(temperature_values_filtered), len(concentrations_filtered))
+
+    # Plot concentration vs. temperature where transmittance first drops below the threshold
+    try:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.scatter(concentrations_filtered, temperature_values_filtered, marker="o", color="#41424C", s=60)
+
+        # Customize axis labels and title with appropriate fonts
+        ax.set_xlabel("Concentration (mg/mL)", fontsize=14, labelpad=10)
+        ax.set_ylabel("Temperature (°C) at <50% Transmittance", fontsize=14, labelpad=10)
+        ax.set_title("Temperature at First <50% Transmittance vs. Concentration", fontsize=16, pad=15)
+
+        # Adjust tick parameters for readability
+        ax.tick_params(axis='both', which='both', labelsize=12, width=1, length=5)
+
+        # Add grid with lighter color for minimal interference with data points
+        ax.grid(False)
+
+        # Apply tight layout to avoid clipping
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_path, "temp_at_50_transmittance_vs_concentration.png"), dpi=300)
+        plt.close()
+    except Exception as e:
+        print(e)
+
+    ## Plot conc vs t50 for hysteresis
+    # Filter out None values for plotting
+    hyst_temperature_values_filtered = [temp for temp in hysteresis_inflection_temps[4:] if temp is not None]
+    concentrations_filtered = [conc for temp, conc in zip(hysteresis_inflection_temps[4:], concentrations) if temp is not None]
+
+    print(len(hyst_temperature_values_filtered), len(concentrations_filtered))
+
+    # Plot concentration vs. temperature where transmittance first drops below the threshold
+    try:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.scatter(concentrations_filtered, hyst_temperature_values_filtered, marker="o", color="#41424C", s=60)
+
+        # Customize axis labels and title with appropriate fonts
+        ax.set_xlabel("Concentration (mg/mL)", fontsize=14, labelpad=10)
+        ax.set_ylabel("Temperature (°C) at >50% Transmittance", fontsize=14, labelpad=10)
+        ax.set_title("Temperature at First >50% Transmittance vs. Concentration (Hysteresis)", fontsize=16, pad=15)
+
+        # Adjust tick parameters for readability
+        ax.tick_params(axis='both', which='both', labelsize=12, width=1, length=5)
+
+        # Add grid with lighter color for minimal interference with data points
+        ax.grid(False)
+
+        # Apply tight layout to avoid clipping
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_path, "temp_at_50_transmittance_vs_concentration_hysteresis.png"), dpi=300)
+        plt.close()
+    except Exception as e:
+        print(e)
+
+    ### TPOT Predictor & Pipeline Optimisation
+    # Convert to numpy arrays
+    X = np.array(concentrations_filtered).reshape(-1, 1)  # Reshape for a single feature
+    y = np.array(temperature_values_filtered)
+
+    # Train/test split
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Train a TPOTRegressor
+    tpot = TPOTRegressor(generations=10, population_size=75, verbosity=2, random_state=42, scoring="r2")
+    tpot.fit(X_train, y_train)
+
+    # Evaluate on the test set
+    y_pred = tpot.predict(X_test)
+    r2 = r2_score(y_test, y_pred)
+    mse = mean_squared_error(y_test, y_pred)
+
+    print(f"Optimized model R²: {r2:.4f}")
+    print(f"Optimized model MSE: {mse:.4f}")
+
+    # Plot predicted vs actual
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.scatter(y_pred, y_test, marker="o", color="#41424C", s=60)
+
+    # Add a diagonal line to indicate perfect prediction
+    min_val = min(min(y_test), min(y_pred))
+    max_val = max(max(y_test), max(y_pred))
+    ax.plot([min_val, max_val], [min_val, max_val], 'k--', lw=2, label="Ideal Prediction Line")
+
+    # Customize plot
+    ax.set_xlabel("Predicted Temperature (°C) at <50% Transmittance", fontsize=14, labelpad=10)
+    ax.set_ylabel("Actual Temperature (°C) at <50% Transmittance", fontsize=14, labelpad=10)
+    ax.set_title("Actual vs. Predicted Temperature at <50% Transmittance", fontsize=16, pad=15)
+
+    # Add metrics as text on the plot
+    ax.text(0.05, 0.9, f'R² = {r2:.4f}\nMSE = {mse:.4f}',
+            transform=ax.transAxes, fontsize=12, verticalalignment='top',
+            bbox=dict(facecolor='white', alpha=0.8))
+
+    ax.legend(loc='best', fontsize=10)
+    ax.grid(False)
+
+    # Save plot
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_path, "predicted_vs_actual_temperature.png"), dpi=300)
+    plt.close()
+
+    # Export the optimized pipeline
+    pipeline_path = os.path.join(out_path, "tpot_optimized_pipeline.py")
+    tpot.export(pipeline_path)
+    print(f"Optimized pipeline exported to {pipeline_path}")
+
+    ### TPOT Predictor & Pipeline Optimisation - Hysteresis
+    # Convert to numpy arrays
+    X = np.array(concentrations_filtered).reshape(-1, 1)  # Reshape for a single feature
+    y = np.array(hyst_temperature_values_filtered)
+
+    # Train/test split
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Train a TPOTRegressor
+    tpot = TPOTRegressor(generations=10, population_size=75, verbosity=2, random_state=42, scoring="r2")
+    tpot.fit(X_train, y_train)
+
+    # Evaluate on the test set
+    y_pred = tpot.predict(X_test)
+    r2 = r2_score(y_test, y_pred)
+    mse = mean_squared_error(y_test, y_pred)
+
+    print(f"Optimized model R²: {r2:.4f}")
+    print(f"Optimized model MSE: {mse:.4f}")
+
+    # Plot predicted vs actual
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.scatter(y_pred, y_test, marker="o", color="#41424C", s=60)
+
+    # Add a diagonal line to indicate perfect prediction
+    min_val = min(min(y_test), min(y_pred))
+    max_val = max(max(y_test), max(y_pred))
+    ax.plot([min_val, max_val], [min_val, max_val], 'k--', lw=2, label="Ideal Prediction Line")
+
+    # Customize plot
+    ax.set_xlabel("Predicted Temperature (°C) at >50% Transmittance", fontsize=14, labelpad=10)
+    ax.set_ylabel("Actual Temperature (°C) at >50% Transmittance", fontsize=14, labelpad=10)
+    ax.set_title("Actual vs. Predicted Temperature at >50% Transmittance (Hysteresis)", fontsize=16, pad=15)
+
+    # Add metrics as text on the plot
+    ax.text(0.05, 0.9, f'R² = {r2:.4f}\nMSE = {mse:.4f}',
+            transform=ax.transAxes, fontsize=12, verticalalignment='top',
+            bbox=dict(facecolor='white', alpha=0.8))
+
+    ax.legend(loc='best', fontsize=10)
+    ax.grid(False)
+
+    # Save plot
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_path, "predicted_vs_actual_temperature_hysteresis.png"), dpi=300)
+    plt.close()
+
+    # Export the optimized pipeline
+    pipeline_path = os.path.join(out_path, "tpot_optimized_pipeline_hysteresis.py")
+    tpot.export(pipeline_path)
+    print(f"Optimized pipeline exported to {pipeline_path}")
+
     ### Plot temperature of heating plates over time
     try:
         times = [(t - time_stamps[0]).total_seconds() / 60 for t in time_stamps]
@@ -2654,7 +2830,6 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
         plt.close()
     except Exception as e:
         print(e)
-
     try:
         json_file_path = os.path.join(out_path, f'temperature_data_{start_time.replace(":", "_")}.json')
         experiment_metadata["end_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
