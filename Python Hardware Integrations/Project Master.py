@@ -24,6 +24,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
 from matplotlib.ticker import AutoMinorLocator
+from tpot import TPOTRegressor
+import shutil
 
 # Set plotting parameters globally
 mpl.rcParams['figure.dpi'] = 600
@@ -2174,7 +2176,7 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
     """
     start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    start_temp = 30.0
+    start_temp = 25.0
     target_temp = 40.0
     step_size = 0.5
     current_temp = start_temp
@@ -2189,7 +2191,7 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
     temps2_plotting = []
     data_paths = []
 
-    volumes_csv = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\14-Nov varied concs\Duplicated_Volumes.csv"
+    volumes_csv = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\28-Nov full plate & modelling\Duplicated_Volumes.csv"
     volumes_df = load_data(volumes_csv)
 
     log_msg("Select path for data output:")
@@ -2269,39 +2271,42 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
 
     def stabilize_and_measure(temp):
         """Stabilizes at the specified temperature and collects data."""
-        log_msg(f"Setting goal temperature to {temp}.")
-        send_message(conn, message_type="SET_TEMP", message_data=str(temp))
+        try:
+            log_msg(f"Setting goal temperature to {temp}.")
+            send_message(conn, message_type="SET_TEMP", message_data=str(temp))
 
-        check_stable_temp(conn, temp, stabilization_time=45, check_interval=5, range_tolerance=0.2,
-                          temps1=temps1, temps2=temps2, time_stamps=time_stamps)
+            check_stable_temp(conn, temp, stabilization_time=45, check_interval=5, range_tolerance=0.2,
+                              temps1=temps1, temps2=temps2, time_stamps=time_stamps)
 
-        experiment_metadata["temperature_steps"].append({
-            "target_temperature": temp,
-            "temps1": temps1[-1],
-            "temps2": temps2[-1],
-            "timestamp": time_stamps[-1].strftime("%Y-%m-%d %H:%M:%S")
-        })
+            experiment_metadata["temperature_steps"].append({
+                "target_temperature": temp,
+                "temps1": temps1[-1],
+                "temps2": temps2[-1],
+                "timestamp": time_stamps[-1].strftime("%Y-%m-%d %H:%M:%S")
+            })
 
-        # Allowing ten minutes for plate to reach current temperature
-        log_msg(f"Allowing 2 minutes for plate to reach current temperature.")
-        time.sleep(pause_time)
+            # Allowing ten minutes for plate to reach current temperature
+            log_msg(f"Allowing {pause_time//60} minutes for plate to reach current temperature.")
+            time.sleep(pause_time)
 
-        log_msg("Requesting to run measurement protocol.")
-        send_message(conn, "RUN_PROTOCOL", "Empty Plate Reading")
+            log_msg("Requesting to run measurement protocol.")
+            send_message(conn, "RUN_PROTOCOL", "Empty Plate Reading")
 
-        while True:
-            msg_type, msg_data = receive_message(conn)
-            if msg_type == "CSV_FILE":
-                log_msg("Data received.")
-                data_paths.append(msg_data)
-                measurement_times.append(datetime.now())
-                temps1_plotting.append(temps1[-1])
-                temps2_plotting.append(temps2[-1])
-                log_msg("Temperature and data path saved.")
-                break
-            else:
-                log_msg("Yet to receive data.")
-                time.sleep(5)
+            while True:
+                msg_type, msg_data = receive_message(conn)
+                if msg_type == "CSV_FILE":
+                    log_msg("Data received.")
+                    data_paths.append(msg_data)
+                    measurement_times.append(datetime.now())
+                    temps1_plotting.append(temps1[-1])
+                    temps2_plotting.append(temps2[-1])
+                    log_msg("Temperature and data path saved.")
+                    break
+                else:
+                    log_msg("Yet to receive data.")
+                    time.sleep(5)
+        except Exception as e:
+            log_msg(e)
 
     # Step through temperatures up to target_temp
     try:
@@ -2314,6 +2319,31 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
         while current_temp >= start_temp:
             stabilize_and_measure(current_temp)
             current_temp -= step_size
+
+        # current_temp = 40.0
+        # stabilize_and_measure(current_temp)
+        #
+        # # Set the duration for the loop (in seconds)
+        # duration = 2 * 60 * 60  # 2 hours in seconds
+        # start_time = time.time()
+        #
+        # while time.time() - start_time < duration:
+        #     # Perform measurement
+        #     stabilize_and_measure(current_temp)
+        #     time.sleep(1)  # Sleep for 1 second between iterations
+        #
+        # print("Loop finished after 2 hours.")
+        #
+        # current_temp = 30.0
+        # start_time = time.time()
+        #
+        # while time.time() - start_time < duration:
+        #     # Perform measurement
+        #     stabilize_and_measure(current_temp)
+        #     time.sleep(1)  # Sleep for 1 second between iterations
+        #
+        # print("Loop finished after 2 hours.")
+
     except Exception as e:
         log_msg(f"Error during temperature measurement steps: {e}")
         return
@@ -2328,7 +2358,7 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
         try:
             plate = load_data_new(plate_background_path)
             data = load_data_new(path)
-            corrected_array = separate_subtract_and_recombine(data, plate, 0)[600][0:4].to_numpy()
+            corrected_array = separate_subtract_and_recombine(data, plate, 0)[600].to_numpy()
 
             transmittance_array = 10 ** (-corrected_array) * 100
             transmittance_df = pd.DataFrame(transmittance_array)
@@ -2339,19 +2369,40 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
             average = np.average(transmittance_array[1:4])
             std = np.std(transmittance_array[1:4])
             abs_std_dev.append((average, std))
+
+            # Concatenate all transmittance data into a single DataFrame
+            stacked_transmittance_df = pd.concat(trans_dfs, axis=1)
+
+            # Save the combined transmittance DataFrame
+            stacked_filename = os.path.join(transmittance_dir, "stacked_transmittance.csv")
+            stacked_transmittance_df.to_csv(stacked_filename, index=False)
+
+            # Extract averages and standard deviations for plotting
+            averages = [item[0] for item in abs_std_dev]
+            std_devs = [item[1] for item in abs_std_dev]
         except Exception as e:
             log_msg(f"Error processing path {path}: {e}")
 
-    # Concatenate all transmittance data into a single DataFrame
-    stacked_transmittance_df = pd.concat(trans_dfs, axis=1)
-
-    # Save the combined transmittance DataFrame
-    stacked_filename = os.path.join(transmittance_dir, "stacked_transmittance.csv")
-    stacked_transmittance_df.to_csv(stacked_filename, index=False)
-
-    # Extract averages and standard deviations for plotting
-    averages = [item[0] for item in abs_std_dev]
-    std_devs = [item[1] for item in abs_std_dev]
+    # # Move paths
+    # try:
+    #     # Destination directory
+    #     destination_dir = out_path
+    #
+    #     # Ensure the destination directory exists
+    #     os.makedirs(destination_dir, exist_ok=True)
+    #
+    #     # Loop through the paths and move each file
+    #     for path in data_paths:
+    #         if os.path.isfile(path):  # Check if the path points to a file
+    #             try:
+    #                 shutil.move(path, destination_dir)
+    #                 print(f"Moved {path} to {destination_dir}")
+    #             except Exception as e:
+    #                 print(f"Failed to move {path}. Error: {e}")
+    #         else:
+    #             print(f"{path} does not exist or is not a file.")
+    # except Exception as e:
+    #     print(e)
 
     def first_below_threshold_index(row):
         # Iterate over the row with index and return the first index where value < threshold
@@ -2446,6 +2497,39 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
     except Exception as e:
         print(e)
 
+    ### Plot individual transmittances over time
+    try:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        times = [(t - measurement_times[0]).total_seconds() / 60 for t in measurement_times]
+
+        for i, (index, row) in enumerate(stacked_transmittance_df.iterrows()):
+            label = f"{round(volumes_df.iloc[i, 0] * (10 / 300), 2)} mg/mL"  # Get the label from volumes_df's first column
+            ax.plot(times, row.values, 'o-', markersize=6, linewidth=1.5)
+
+        # Customize axis labels and title with appropriate fonts
+        ax.set_xlabel("Time (Seconds)", fontsize=14, labelpad=10)
+        ax.set_ylabel('Average Transmittance (%)', fontsize=14, labelpad=10)
+        ax.set_title('Percent Transmittance at 600 nm of p(NIPAM) in Water vs. Time',
+                     fontsize=16, pad=15)
+
+        ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+
+        # Adjust tick parameters for readability
+        ax.tick_params(axis='both', which='both', labelsize=12, width=1, length=5)
+
+        # Add legend with refined positioning and styling
+        ax.legend(loc='best', fontsize=12, frameon=False)
+
+        # Add grid with lighter color for minimal interference with data points
+        ax.grid(False)
+
+        # Apply tight layout to avoid clipping
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_path, "trans_versus_time_individual.png"), dpi=300)  # High DPI for print quality
+        plt.close()
+    except Exception as e:
+        print(e)
+
     ### Plot averaged transmittances over temp
     try:
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -2491,7 +2575,7 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    for i, (index, row) in enumerate(transmittance.iloc[1:, :].iterrows()):
+    for i, (index, row) in enumerate(transmittance.iterrows()):
 
         # Initial guess and bounds
         p0 = [np.max(row), np.min(row), np.mean(temperature), 1.0]
@@ -2655,260 +2739,533 @@ def server_main():
 
 
 if __name__ == "__main__":
-    server_main()
+    # gen_volumes_csv(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments", step_size=10, num_factors=1)
+    # server_main()
 
     ### Transmittance/temperature test
     # Scatter plot for Percent Transmittance vs Temperature
-    # with open(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\21-Nov equilibrium optimisation\5 mins\temperature_data_2024-11-21 17_08_08.json") as f:
-    #     f = json.load(f)
-    #     averages = f["averages"]
-    #     std_devs = f["std_devs"]
-    #     temps1_plotting = f["temps1_plotted"]
-    #     time_stamps = f["measurement_timestamps"]
-    #     temps1 = f["temps1"]
-    #     temps2 = f["temps2"]
-    #
-    # out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\21-Nov equilibrium optimisation\5 mins\new"
-    # data_paths = []
-    # folder_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\21-Nov equilibrium optimisation\5 mins\abs spectra"
-    # volumes_csv = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\14-Nov varied concs\Duplicated_Volumes.csv"
-    # volumes_df = load_data(volumes_csv)
-    #
-    # # Iterate over files in target folder
-    # for idx, filename in enumerate(os.listdir(folder_path)):
-    #     file_path = os.path.join(folder_path, filename)
-    #
-    #     # Check if it’s a file (and not a directory)
-    #     if os.path.isfile(file_path):
-    #         if idx == 0:
-    #             # Save the first file as plate background path
-    #             plate_background_path = file_path
-    #         else:
-    #             # Save remaining files to data_paths
-    #             data_paths.append(file_path)
-    #
-    # # Post-process data to calculate transmittance and plot results
-    # abs_std_dev = []
-    # trans_dfs = []
-    # transmittance_dir = os.path.join(out_path, 'transmittance spectra')
-    # os.makedirs(transmittance_dir, exist_ok=True)
-    #
-    # for path in data_paths:
-    #     try:
-    #         plate = load_data_new(plate_background_path)
-    #         data = load_data_new(path)
-    #         corrected_array = separate_subtract_and_recombine(data, plate, 0)[600][0:4].to_numpy()
-    #
-    #         transmittance_array = 10 ** (-corrected_array) * 100
-    #         transmittance_df = pd.DataFrame(transmittance_array)
-    #         trans_dfs.append(transmittance_df)
-    #         transmittance_filename = os.path.join(transmittance_dir, f"transmittance_{os.path.basename(path)}")
-    #         transmittance_df.to_csv(transmittance_filename, index=False)
-    #
-    #         average = np.average(transmittance_array[1:4])
-    #         std = np.std(transmittance_array[1:4])
-    #         abs_std_dev.append((average, std))
-    #     except Exception as e:
-    #         log_msg(f"Error processing path {path}: {e}")
-    #
-    # # Concatenate all transmittance data into a single DataFrame
-    # stacked_transmittance_df = pd.concat(trans_dfs, axis=1)
-    #
-    # # Save the combined transmittance DataFrame
-    # stacked_filename = os.path.join(transmittance_dir, "stacked_transmittance.csv")
-    # stacked_transmittance_df.to_csv(stacked_filename, index=False)
-    #
-    # # Extract averages and standard deviations for plotting
-    # averages = [item[0] for item in abs_std_dev]
-    # std_devs = [item[1] for item in abs_std_dev]
-    #
-    # def first_below_threshold_index(row):
-    #     # Iterate over the row with index and return the first index where value < threshold
-    #     for idx, value in enumerate(row):
-    #         if value < 50:
-    #             return idx
-    #     return None  # Return None if no values are below the threshold in the row
-    #
-    # try:
-    #     # Apply the function to each row in stacked_transmittance_df
-    #     first_below_threshold = stacked_transmittance_df.apply(first_below_threshold_index, axis=1)
-    #
-    #     print(stacked_transmittance_df.shape[1])
-    #     print(len(temps1_plotting))
-    #
-    #     temperature_values = []
-    #     concentrations = []
-    #
-    #     # Display the result
-    #     for idx, value in enumerate(first_below_threshold):
-    #         if pd.notna(value):  # Check if a valid integer index was found (not NaN)
-    #             transmittance_value = stacked_transmittance_df.iloc[idx, int(value)]
-    #             temperature = temps1_plotting[int(value)]
-    #
-    #             # Append values for plotting
-    #             temperature_values.append(temperature)
-    #             concentrations.append(volumes_df.iloc[idx, 0]*(10/300))
-    #
-    #             print(f"Row {idx}: Transmittance = {transmittance_value}, Temperature = {temperature}°C")
-    #         else:
-    #             print(f"Row {idx}: No transmittance values below threshold")
-    # except Exception as e:
-    #     print(e)
-    #
-    # ## Plot conc vs t50
-    # # Filter out None values for plotting
-    # temperature_values_filtered = [temp for temp in temperature_values if temp is not None]
-    # concentrations_filtered = [conc for temp, conc in zip(temperature_values, concentrations) if temp is not None]
-    #
-    # # Plot concentration vs. temperature where transmittance first drops below the threshold
-    # try:
-    #     fig, ax = plt.subplots(figsize=(10, 6))
-    #     ax.scatter(concentrations_filtered, temperature_values_filtered, marker="o", color="#41424C", s=60)
-    #
-    #     # Customize axis labels and title with appropriate fonts
-    #     ax.set_xlabel("Concentration (mg/mL)", fontsize=14, labelpad=10)
-    #     ax.set_ylabel("Temperature (°C) at <50% Transmittance", fontsize=14, labelpad=10)
-    #     ax.set_title("Temperature at First <50% Transmittance vs. Concentration", fontsize=16, pad=15)
-    #
-    #     # Adjust tick parameters for readability
-    #     ax.tick_params(axis='both', which='both', labelsize=12, width=1, length=5)
-    #
-    #     # Add grid with lighter color for minimal interference with data points
-    #     ax.grid(False)
-    #
-    #     # Apply tight layout to avoid clipping
-    #     plt.tight_layout()
-    #     plt.savefig(os.path.join(out_path, "temp_at_50_transmittance_vs_concentration.png"), dpi=300)
-    #     plt.close()
-    # except Exception as e:
-    #     print(e)
-    #
-    # ### Plot individual transmittances over temp
-    # try:
-    #     fig, ax = plt.subplots(figsize=(10, 6))
-    #
-    #     for i, (index, row) in enumerate(stacked_transmittance_df.iterrows()):
-    #         label = f"{round(volumes_df.iloc[i, 0] * (10 / 300), 2)} mg/mL"  # Get the label from volumes_df's first column
-    #         ax.plot(temps1_plotting, row.values, 'o-', markersize=6, linewidth=1.5)
-    #
-    #     # Customize axis labels and title with appropriate fonts
-    #     ax.set_xlabel("Temperature (°C)", fontsize=14, labelpad=10)
-    #     ax.set_ylabel('Average Transmittance (%)', fontsize=14, labelpad=10)
-    #     ax.set_title('Percent Transmittance at 600 nm of p(NIPAM) in Water vs. Temperature',
-    #                  fontsize=16, pad=15)
-    #
-    #     ax.xaxis.set_minor_locator(AutoMinorLocator(2))
-    #
-    #     # Adjust tick parameters for readability
-    #     ax.tick_params(axis='both', which='both', labelsize=12, width=1, length=5)
-    #
-    #     # Add legend with refined positioning and styling
-    #     ax.legend(loc='best', fontsize=12, frameon=False)
-    #
-    #     # Add grid with lighter color for minimal interference with data points
-    #     ax.grid(False)
-    #
-    #     # Apply tight layout to avoid clipping
-    #     plt.tight_layout()
-    #     plt.savefig(os.path.join(out_path, "trans_versus_temp_individual.png"), dpi=300)  # High DPI for print quality
-    #     plt.close()
-    # except Exception as e:
-    #     print(e)
-    #
-    # ### Plot averaged transmittances over temp
-    # try:
-    #     fig, ax = plt.subplots(figsize=(10, 6))
-    #
-    #     ax.errorbar(temps1_plotting, averages, yerr=std_devs, ecolor='gray',
-    #                 capsize=4, elinewidth=1, markeredgewidth=1, markersize=6, color="#41424C")
-    #
-    #     ax.plot(temps1_plotting, averages, 'o-',
-    #             markersize=6, linewidth=1.5, label='0.50 mg/mL', color="#41424C")
-    #
-    #     # Customize axis labels and title with appropriate fonts
-    #     ax.set_xlabel("Temperature (°C)", fontsize=14, labelpad=10)
-    #     ax.set_ylabel('Average Transmittance (%)', fontsize=14, labelpad=10)
-    #     ax.set_title('Percent Transmittance at 600 nm of p(NIPAM) in Water vs. Temperature',
-    #                  fontsize=16, pad=15)
-    #
-    #     ax.xaxis.set_minor_locator(AutoMinorLocator(2))
-    #
-    #     # Adjust tick parameters for readability
-    #     ax.tick_params(axis='both', which='both', labelsize=12, width=1, length=5)
-    #
-    #     # Add legend with refined positioning and styling
-    #     ax.legend(loc='best', fontsize=12, frameon=False)
-    #
-    #     # Add grid with lighter color for minimal interference with data points
-    #     # ax.grid(False, linestyle='--', color='0.85', linewidth=0.5)
-    #     ax.grid(False)
-    #
-    #     # Apply tight layout to avoid clipping
-    #     plt.tight_layout()
-    #     plt.savefig(os.path.join(out_path, "trans_versus_temp_averaged.png"), dpi=300)  # High DPI for print quality
-    #     plt.close()
-    # except Exception as e:
-    #     print(e)
-    #
-    # # Example Sigmoidal Function (Boltzmann)
-    # def sigmoidal(x, A1, A2, x0, dx):
-    #     return A2 + (A1 - A2) / (1 + np.exp((x - x0) / dx))
-    #
-    # # Load your data here
-    # temperature = temps1_plotting[:len(temps1_plotting)//2]
-    # transmittance = stacked_transmittance_df
-    #
-    # fig, ax = plt.subplots(figsize=(10, 6))
-    #
-    # for i, (index, row) in enumerate(transmittance.iloc[1:, :].iterrows()):
-    #
-    #     # Initial guess and bounds
-    #     p0 = [np.max(row), np.min(row), np.mean(temperature), 1.0]
-    #     bounds = ([0, 0, min(temperature), 0.1], [110, 110, max(temperature), 10])
-    #
-    #     try:
-    #         # Fit the curve
-    #         popt, pcov = curve_fit(sigmoidal, temperature, row.values[:len(temperature)], p0=p0, bounds=bounds)
-    #         A1, A2, x0, dx = popt
-    #
-    #         # Generate fitted curve and find inflection point
-    #         x_fine = np.linspace(min(temperature), max(temperature), 500)
-    #         fitted_transmittance = sigmoidal(x_fine, *popt)
-    #         dy_dx = np.gradient(fitted_transmittance, x_fine)
-    #         inflection_index = np.argmin(dy_dx)
-    #         inflection_temp = x_fine[inflection_index]
-    #
-    #         # ax.plot(x_fine, dy_dx, linewidth=1.5, linestyle='--', color="#41424C", alpha=0.5)
-    #
-    #         # Plot the fitted curve
-    #         ax.plot(x_fine, fitted_transmittance, linewidth=1.5, linestyle='--', color="red", alpha=0.5)
-    #         ax.axvline(inflection_temp, color="green", linestyle="--", linewidth=1, alpha=0.5, label=f'Inflection Point: {inflection_temp: .1f} °C')
-    #
-    #         ax.plot(temperature, row.values[:len(temperature)], 'o-', markersize=6, linewidth=1.5)
-    #
-    #     except (RuntimeError, ValueError) as e:
-    #         print(f"Curve fitting failed for dataset {i}: {e}")
-    #         continue
-    #
-    # # Customize axis labels and title
-    # ax.set_xlabel("Temperature (°C)", fontsize=14, labelpad=10)
-    # ax.set_ylabel("Average Transmittance (%)", fontsize=14, labelpad=10)
-    # ax.set_title("Fitted Curves for Transmittance vs. Temperature at 0.50 mg/mL", fontsize=16, pad=15)
-    #
-    # # Adjust ticks and add minor locators
-    # ax.xaxis.set_minor_locator(AutoMinorLocator(2))
-    # ax.tick_params(axis='both', which='both', labelsize=12, width=1, length=5)
-    #
-    # # Add legend
-    # ax.legend(loc='best', fontsize=12, frameon=False)
-    #
-    # # Disable grid
-    # ax.grid(False)
-    #
-    # # Apply tight layout
-    # plt.tight_layout()
-    # plt.savefig(os.path.join(out_path, "sigmoidal_fit_transmittance.png"), dpi=300)  # Save high-DPI image
-    # plt.show()
+    with open(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\28-Nov full plate & modelling\temperature_data_2024-11-28 13_40_47.json") as f:
+        f = json.load(f)
+        averages = f["averages"]
+        std_devs = f["std_devs"]
+        temps1_plotting = f["temps1_plotted"]
+        time_stamps = f["measurement_timestamps"]
+        temps1 = f["temps1"]
+        temps2 = f["temps2"]
+
+    out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\28-Nov full plate & modelling\modelling"
+    data_paths = []
+    folder_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\28-Nov full plate & modelling\abs spectra"
+    volumes_csv = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\28-Nov full plate & modelling\Duplicated_Volumes.csv"
+    volumes_df = load_data(volumes_csv)
+    measurement_times = []
+
+    # Iterate over files in target folder
+    for idx, filename in enumerate(os.listdir(folder_path)):
+        file_path = os.path.join(folder_path, filename)
+
+        # Check if it’s a file (and not a directory)
+        if os.path.isfile(file_path):
+            if idx == 0:
+                # Save the first file as plate background path
+                plate_background_path = file_path
+            else:
+                # Save remaining files to data_paths
+                data_paths.append(file_path)
+
+                # Extract the file name
+                file_name = os.path.basename(file_path)
+
+                # Extract the time part (last 4 characters before ".csv")
+                time_str = file_name.split('_')[-1].split('.')[0]
+
+                # Convert to a datetime.time object
+                measurement_time = datetime.strptime(time_str, "%H%M").time()
+                measurement_times.append(measurement_time)
+
+    # Post-process data to calculate transmittance and plot results
+    abs_std_dev = []
+    trans_dfs = []
+    transmittance_dir = os.path.join(out_path, 'transmittance spectra')
+    os.makedirs(transmittance_dir, exist_ok=True)
+
+    for path in data_paths:
+        try:
+            plate = load_data_new(plate_background_path)
+            data = load_data_new(path)
+            corrected_array = separate_subtract_and_recombine(data, plate, 0)[600].to_numpy()
+
+            transmittance_array = 10 ** (-corrected_array) * 100
+            transmittance_df = pd.DataFrame(transmittance_array)
+            trans_dfs.append(transmittance_df)
+            transmittance_filename = os.path.join(transmittance_dir, f"transmittance_{os.path.basename(path)}")
+            transmittance_df.to_csv(transmittance_filename, index=False)
+
+            average = np.average(transmittance_array[1:4])
+            std = np.std(transmittance_array[1:4])
+            abs_std_dev.append((average, std))
+        except Exception as e:
+            log_msg(f"Error processing path {path}: {e}")
+
+    # Concatenate all transmittance data into a single DataFrame
+    stacked_transmittance_df = pd.concat(trans_dfs, axis=1)
+
+    # Save the combined transmittance DataFrame
+    stacked_filename = os.path.join(transmittance_dir, "stacked_transmittance.csv")
+    stacked_transmittance_df.to_csv(stacked_filename, index=False)
+
+    # Extract averages and standard deviations for plotting
+    averages = [item[0] for item in abs_std_dev]
+    std_devs = [item[1] for item in abs_std_dev]
+
+
+    def first_below_threshold_index(row):
+        # Iterate over the row with index and return the first index where value < threshold
+        for idx, value in enumerate(row):
+            if value < 50:
+                return idx
+        return None  # Return None if no values are below the threshold in the row
+
+
+    try:
+        # Apply the function to each row in stacked_transmittance_df
+        first_below_threshold = stacked_transmittance_df.apply(first_below_threshold_index, axis=1)
+
+        print(stacked_transmittance_df.shape[1])
+        print(len(temps1_plotting))
+
+        temperature_values = []
+        concentrations = []
+
+        # Display the result
+        for idx, value in enumerate(first_below_threshold):
+            if pd.notna(value):  # Check if a valid integer index was found (not NaN)
+                transmittance_value = stacked_transmittance_df.iloc[idx, int(value)]
+                temperature = temps1_plotting[int(value)]
+
+                # Append values for plotting
+                temperature_values.append(temperature)
+                concentrations.append(volumes_df.iloc[idx, 0] * (10 / 300))
+
+                print(f"Row {idx}: Transmittance = {transmittance_value}, Temperature = {temperature}°C")
+            else:
+                print(f"Row {idx}: No transmittance values below threshold")
+    except Exception as e:
+        print(e)
+
+    ### Plot individual transmittances over temp
+    try:
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        for i, (index, row) in enumerate(stacked_transmittance_df.iterrows()):
+            label = f"{round(volumes_df.iloc[i, 0] * (10 / 300), 2)} mg/mL"  # Get the label from volumes_df's first column
+            ax.plot(temps1_plotting, row.values, 'o-', markersize=6, linewidth=1.5)
+
+        # Customize axis labels and title with appropriate fonts
+        ax.set_xlabel("Temperature (°C)", fontsize=14, labelpad=10)
+        ax.set_ylabel('Average Transmittance (%)', fontsize=14, labelpad=10)
+        ax.set_title('Percent Transmittance at 600 nm of p(NIPAM) in Water vs. Temperature',
+                     fontsize=16, pad=15)
+
+        ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+
+        # Adjust tick parameters for readability
+        ax.tick_params(axis='both', which='both', labelsize=12, width=1, length=5)
+
+        # Add legend with refined positioning and styling
+        ax.legend(loc='best', fontsize=12, frameon=False)
+
+        # Add grid with lighter color for minimal interference with data points
+        ax.grid(False)
+
+        # Apply tight layout to avoid clipping
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_path, "trans_versus_temp_individual.png"), dpi=300)  # High DPI for print quality
+        plt.close()
+    except Exception as e:
+        print(e)
+
+    ### Plot individual transmittances over time
+    try:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        times = [(t - measurement_times[0]).total_seconds() / 60 for t in measurement_times]
+
+        for i, (index, row) in enumerate(stacked_transmittance_df.iterrows()):
+            label = f"{round(volumes_df.iloc[i, 0] * (10 / 300), 2)} mg/mL"  # Get the label from volumes_df's first column
+            ax.plot(times, row.values, 'o-', markersize=6, linewidth=1.5)
+
+        # Customize axis labels and title with appropriate fonts
+        ax.set_xlabel("Time (Seconds)", fontsize=14, labelpad=10)
+        ax.set_ylabel('Average Transmittance (%)', fontsize=14, labelpad=10)
+        ax.set_title('Percent Transmittance at 600 nm of p(NIPAM) in Water vs. Time',
+                     fontsize=16, pad=15)
+
+        ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+
+        # Adjust tick parameters for readability
+        ax.tick_params(axis='both', which='both', labelsize=12, width=1, length=5)
+
+        # Add legend with refined positioning and styling
+        ax.legend(loc='best', fontsize=12, frameon=False)
+
+        # Add grid with lighter color for minimal interference with data points
+        ax.grid(False)
+
+        # Apply tight layout to avoid clipping
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_path, "trans_versus_time_individual.png"), dpi=300)  # High DPI for print quality
+        plt.close()
+    except Exception as e:
+        print(e)
+
+    ### Plot averaged transmittances over temp
+    try:
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        ax.errorbar(temps1_plotting, averages, yerr=std_devs, ecolor='gray',
+                    capsize=4, elinewidth=1, markeredgewidth=1, markersize=6, color="#41424C")
+
+        ax.plot(temps1_plotting, averages, 'o-',
+                markersize=6, linewidth=1.5, label='0.50 mg/mL', color="#41424C")
+
+        # Customize axis labels and title with appropriate fonts
+        ax.set_xlabel("Temperature (°C)", fontsize=14, labelpad=10)
+        ax.set_ylabel('Average Transmittance (%)', fontsize=14, labelpad=10)
+        ax.set_title('Percent Transmittance at 600 nm of p(NIPAM) in Water vs. Temperature',
+                     fontsize=16, pad=15)
+
+        ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+
+        # Adjust tick parameters for readability
+        ax.tick_params(axis='both', which='both', labelsize=12, width=1, length=5)
+
+        # Add legend with refined positioning and styling
+        ax.legend(loc='best', fontsize=12, frameon=False)
+
+        # Add grid with lighter color for minimal interference with data points
+        # ax.grid(False, linestyle='--', color='0.85', linewidth=0.5)
+        ax.grid(False)
+
+        # Apply tight layout to avoid clipping
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_path, "trans_versus_temp_averaged.png"), dpi=300)  # High DPI for print quality
+        plt.close()
+    except Exception as e:
+        print(e)
+
+    # Example Sigmoidal Function (Boltzmann)
+    def sigmoidal(x, A1, A2, x0, dx):
+        return A2 + (A1 - A2) / (1 + np.exp((x - x0) / dx))
+
+    # Load your data here
+    temperature = temps1_plotting[:len(temps1_plotting) // 2]
+    transmittance = stacked_transmittance_df
+    inflection_temps = []
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    for i, (index, row) in enumerate(transmittance.iterrows()):
+
+        # Initial guess and bounds
+        p0 = [np.max(row), np.min(row), np.mean(temperature), 1.0]
+        bounds = ([0, 0, min(temperature), 0.1], [110, 110, max(temperature), 10])
+
+        try:
+            # Fit the curve
+            popt, pcov = curve_fit(sigmoidal, temperature, row.values[:len(temperature)], p0=p0, bounds=bounds)
+            A1, A2, x0, dx = popt
+
+            # Generate fitted curve and find inflection point
+            x_fine = np.linspace(min(temperature), max(temperature), 500)
+            fitted_transmittance = sigmoidal(x_fine, *popt)
+            dy_dx = np.gradient(fitted_transmittance, x_fine)
+            inflection_index = np.argmin(dy_dx)
+            inflection_temp = x_fine[inflection_index]
+            inflection_temps.append(inflection_temp)
+
+            # ax.plot(x_fine, dy_dx, linewidth=1.5, linestyle='--', color="#41424C", alpha=0.5)
+
+            # Plot the fitted curve
+            ax.plot(x_fine, fitted_transmittance, linewidth=1.5, linestyle='--', color="red", alpha=0.5)
+            ax.axvline(inflection_temp, color="green", linestyle="--", linewidth=1, alpha=0.5,
+                       label=f'Inflection Point: {inflection_temp: .1f} °C')
+
+            ax.plot(temperature, row.values[:len(temperature)], 'o-', markersize=6, linewidth=1.5)
+
+        except (RuntimeError, ValueError) as e:
+            print(f"Curve fitting failed for dataset {i}: {e}")
+            continue
+
+    # Customize axis labels and title
+    ax.set_xlabel("Temperature (°C)", fontsize=14, labelpad=10)
+    ax.set_ylabel("Average Transmittance (%)", fontsize=14, labelpad=10)
+    ax.set_title("Fitted Curves for Transmittance vs. Temperature at 0.50 mg/mL", fontsize=16, pad=15)
+
+    # Adjust ticks and add minor locators
+    ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.tick_params(axis='both', which='both', labelsize=12, width=1, length=5)
+
+    # Add legend
+    ax.legend(loc='best', fontsize=12, frameon=False)
+
+    # Disable grid
+    ax.grid(False)
+
+    # Apply tight layout
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_path, "sigmoidal_fit_transmittance.png"), dpi=300)  # Save high-DPI image
+
+    # # Hysteresis trans (second half)
+    temperature = temps1_plotting[len(temps1_plotting) // 2:]
+    transmittance = stacked_transmittance_df
+    hysteresis_inflection_temps = []
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    for i, (index, row) in enumerate(transmittance.iterrows()):
+
+        # Initial guess and bounds
+        p0 = [np.max(row[len(temperature):]), np.min(row[len(temperature):]), np.mean(temperature), 1.0]
+        bounds = ([0, 0, min(temperature), 0.1], [110, 110, max(temperature), 10])
+
+        try:
+            # Fit the curve
+            popt, pcov = curve_fit(sigmoidal, temperature, row.values[len(row) - len(temperature):], p0=p0,
+                                   bounds=bounds)
+            A1, A2, x0, dx = popt
+
+            # Generate fitted curve and find inflection point
+            x_fine = np.linspace(min(temperature), max(temperature), 500)
+            fitted_transmittance = sigmoidal(x_fine, *popt)
+            dy_dx = np.gradient(fitted_transmittance, x_fine)
+            inflection_index = np.argmin(dy_dx)
+            inflection_temp = x_fine[inflection_index]
+            hysteresis_inflection_temps.append(inflection_temp)
+
+            # Plot the fitted curve
+            ax.plot(x_fine, fitted_transmittance, linewidth=1.5, linestyle='--', color="red", alpha=0.5)
+            ax.axvline(inflection_temp, color="green", linestyle="--", linewidth=1, alpha=0.5,
+                       label=f'Inflection Point: {inflection_temp: .1f} °C')
+
+            ax.plot(temperature, row.values[len(row) - len(temperature):], 'o-', markersize=6, linewidth=1.5)
+
+        except (RuntimeError, ValueError) as e:
+            print(f"Curve fitting failed for dataset {i}: {e}")
+            continue
+
+    # Customize axis labels and title
+    ax.set_xlabel("Temperature (°C)", fontsize=14, labelpad=10)
+    ax.set_ylabel("Average Transmittance (%)", fontsize=14, labelpad=10)
+    ax.set_title("Fitted Curves for Hysteresis Transmittance vs. Temperature at 0.50 mg/mL", fontsize=16, pad=15)
+
+    # Adjust ticks and add minor locators
+    ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.tick_params(axis='both', which='both', labelsize=12, width=1, length=5)
+
+    # Add legend
+    ax.legend(loc='best', fontsize=12, frameon=False)
+
+    # Disable grid
+    ax.grid(False)
+
+    # Apply tight layout
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_path, "sigmoidal_fit_hysteresis_transmittance.png"), dpi=300)  # Save high-DPI image
+
+    ## Plot conc vs t50
+    # Filter out None values for plotting
+    temperature_values_filtered = [temp for temp in inflection_temps[4:] if temp is not None]
+    concentrations_filtered = [conc for temp, conc in zip(inflection_temps[4:], concentrations) if temp is not None]
+
+    print(len(temperature_values_filtered), len(concentrations_filtered))
+
+    # Plot concentration vs. temperature where transmittance first drops below the threshold
+    try:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.scatter(concentrations_filtered, temperature_values_filtered, marker="o", color="#41424C", s=60)
+
+        # Customize axis labels and title with appropriate fonts
+        ax.set_xlabel("Concentration (mg/mL)", fontsize=14, labelpad=10)
+        ax.set_ylabel("Temperature (°C) at <50% Transmittance", fontsize=14, labelpad=10)
+        ax.set_title("Temperature at First <50% Transmittance vs. Concentration", fontsize=16, pad=15)
+
+        # Adjust tick parameters for readability
+        ax.tick_params(axis='both', which='both', labelsize=12, width=1, length=5)
+
+        # Add grid with lighter color for minimal interference with data points
+        ax.grid(False)
+
+        # Apply tight layout to avoid clipping
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_path, "temp_at_50_transmittance_vs_concentration.png"), dpi=300)
+        plt.close()
+    except Exception as e:
+        print(e)
+
+    ## Plot conc vs t50 for hysteresis
+    # Filter out None values for plotting
+    hyst_temperature_values_filtered = [temp for temp in hysteresis_inflection_temps[4:] if temp is not None]
+    concentrations_filtered = [conc for temp, conc in zip(hysteresis_inflection_temps[4:], concentrations) if temp is not None]
+
+    print(len(hyst_temperature_values_filtered), len(concentrations_filtered))
+
+    # Plot concentration vs. temperature where transmittance first drops below the threshold
+    try:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.scatter(concentrations_filtered, hyst_temperature_values_filtered, marker="o", color="#41424C", s=60)
+
+        # Customize axis labels and title with appropriate fonts
+        ax.set_xlabel("Concentration (mg/mL)", fontsize=14, labelpad=10)
+        ax.set_ylabel("Temperature (°C) at >50% Transmittance", fontsize=14, labelpad=10)
+        ax.set_title("Temperature at First >50% Transmittance vs. Concentration (Hysteresis)", fontsize=16, pad=15)
+
+        # Adjust tick parameters for readability
+        ax.tick_params(axis='both', which='both', labelsize=12, width=1, length=5)
+
+        # Add grid with lighter color for minimal interference with data points
+        ax.grid(False)
+
+        # Apply tight layout to avoid clipping
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_path, "temp_at_50_transmittance_vs_concentration_hysteresis.png"), dpi=300)
+        plt.close()
+    except Exception as e:
+        print(e)
+
+    ### TPOT Predictor & Pipeline Optimisation
+    # Convert to numpy arrays
+    X = np.array(concentrations_filtered).reshape(-1, 1)  # Reshape for a single feature
+    y = np.array(temperature_values_filtered)
+
+    # Train/test split
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Train a TPOTRegressor
+    tpot = TPOTRegressor(generations=10, population_size=75, verbosity=2, random_state=42, scoring="r2")
+    tpot.fit(X_train, y_train)
+
+    # Evaluate on the test set
+    y_pred = tpot.predict(X_test)
+    r2 = r2_score(y_test, y_pred)
+    mse = mean_squared_error(y_test, y_pred)
+
+    print(f"Optimized model R²: {r2:.4f}")
+    print(f"Optimized model MSE: {mse:.4f}")
+
+    # Plot predicted vs actual
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.scatter(y_pred, y_test, marker="o", color="#41424C", s=60)
+
+    # Add a diagonal line to indicate perfect prediction
+    min_val = min(min(y_test), min(y_pred))
+    max_val = max(max(y_test), max(y_pred))
+    ax.plot([min_val, max_val], [min_val, max_val], 'k--', lw=2, label="Ideal Prediction Line")
+
+    # Customize plot
+    ax.set_xlabel("Predicted Temperature (°C) at <50% Transmittance", fontsize=14, labelpad=10)
+    ax.set_ylabel("Actual Temperature (°C) at <50% Transmittance", fontsize=14, labelpad=10)
+    ax.set_title("Actual vs. Predicted Temperature at <50% Transmittance", fontsize=16, pad=15)
+
+    # Add metrics as text on the plot
+    ax.text(0.05, 0.9, f'R² = {r2:.4f}\nMSE = {mse:.4f}',
+            transform=ax.transAxes, fontsize=12, verticalalignment='top',
+            bbox=dict(facecolor='white', alpha=0.8))
+
+    ax.legend(loc='best', fontsize=10)
+    ax.grid(False)
+
+    # Save plot
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_path, "predicted_vs_actual_temperature.png"), dpi=300)
+    plt.close()
+
+    # Export the optimized pipeline
+    pipeline_path = os.path.join(out_path, "tpot_optimized_pipeline.py")
+    tpot.export(pipeline_path)
+    print(f"Optimized pipeline exported to {pipeline_path}")
+
+    ### TPOT Predictor & Pipeline Optimisation - Hysteresis
+    # Convert to numpy arrays
+    X = np.array(concentrations_filtered).reshape(-1, 1)  # Reshape for a single feature
+    y = np.array(hyst_temperature_values_filtered)
+
+    # Train/test split
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Train a TPOTRegressor
+    tpot = TPOTRegressor(generations=10, population_size=75, verbosity=2, random_state=42, scoring="r2")
+    tpot.fit(X_train, y_train)
+
+    # Evaluate on the test set
+    y_pred = tpot.predict(X_test)
+    r2 = r2_score(y_test, y_pred)
+    mse = mean_squared_error(y_test, y_pred)
+
+    print(f"Optimized model R²: {r2:.4f}")
+    print(f"Optimized model MSE: {mse:.4f}")
+
+    # Plot predicted vs actual
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.scatter(y_pred, y_test, marker="o", color="#41424C", s=60)
+
+    # Add a diagonal line to indicate perfect prediction
+    min_val = min(min(y_test), min(y_pred))
+    max_val = max(max(y_test), max(y_pred))
+    ax.plot([min_val, max_val], [min_val, max_val], 'k--', lw=2, label="Ideal Prediction Line")
+
+    # Customize plot
+    ax.set_xlabel("Predicted Temperature (°C) at >50% Transmittance", fontsize=14, labelpad=10)
+    ax.set_ylabel("Actual Temperature (°C) at >50% Transmittance", fontsize=14, labelpad=10)
+    ax.set_title("Actual vs. Predicted Temperature at >50% Transmittance (Hysteresis)", fontsize=16, pad=15)
+
+    # Add metrics as text on the plot
+    ax.text(0.05, 0.9, f'R² = {r2:.4f}\nMSE = {mse:.4f}',
+            transform=ax.transAxes, fontsize=12, verticalalignment='top',
+            bbox=dict(facecolor='white', alpha=0.8))
+
+    ax.legend(loc='best', fontsize=10)
+    ax.grid(False)
+
+    # Save plot
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_path, "predicted_vs_actual_temperature_hysteresis.png"), dpi=300)
+    plt.close()
+
+    # Export the optimized pipeline
+    pipeline_path = os.path.join(out_path, "tpot_optimized_pipeline_hysteresis.py")
+    tpot.export(pipeline_path)
+    print(f"Optimized pipeline exported to {pipeline_path}")
+
+    ### Plot temperature of heating plates over time
+    try:
+        times = [(t - time_stamps[0]).total_seconds() / 60 for t in time_stamps]
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.plot(times, temps1, 'o-', label='Heating Plate 1 Temperature', markersize=6,
+                color="#41424C", linewidth=1.5)
+        ax.plot(times, temps2, 's-', label='Heating Plate 2 Temperature', markersize=6,
+                color="#41424C", linewidth=1.5)
+
+        # Axis labels and title
+        ax.set_xlabel('Time (minutes)', fontsize=14, labelpad=10)
+        ax.set_ylabel('Temperature (°C)', fontsize=14, labelpad=10)
+        ax.set_title('Heating Plate Temperature Over Time', fontsize=16, pad=15)
+
+        # Tick parameters
+        ax.tick_params(axis='both', which='major', labelsize=12, width=1, length=5)
+
+        # Legend
+        ax.legend(loc='best', fontsize=12, frameon=False)
+
+        # Grid
+        ax.grid(False)
+
+        # Tight layout
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_path, "plate_temp_over_time.png"), dpi=300)
+        plt.close()
+    except Exception as e:
+        print(e)
+
     ###
 
     ### Evaporation Over Time Code
@@ -3013,27 +3370,138 @@ if __name__ == "__main__":
     #     json.dump(experiment_metadata, f, indent=4, ensure_ascii=False)
 
     # # Load data
-    # plate = load_data_new(
-    #     r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Plate 2a.csv")
-    # data = load_data_new(
-    #     r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\240919_1305.csv")
-    # out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Test Folders\02-Oct-2024 expanded script figures"
+    # plate = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\04-Nov three factor - toluene\241104_1530.csv"
+    # data = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\04-Nov three factor - toluene\241104_1549.csv"
+    # out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\04-Nov three factor - toluene\autosklearn test"
     # volumes = load_data(
-    #     r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\18-Sep-2024\Volumes 18-Sep Duplicated.csv").to_numpy()
+    #     r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\DOE + Monomer + Polymer Mixtures\Multivariable Experiments\Duplicated_Volumes.csv")
     #
-    # data = separate_subtract_and_recombine(data, plate).iloc[:, 1:]
+    # from tpot import TPOTRegressor
+    # from sklearn.model_selection import train_test_split
+    # from sklearn.preprocessing import StandardScaler
+    # from sklearn.metrics import r2_score, mean_squared_error
+    # import matplotlib.pyplot as plt
+    # import pandas as pd
+    # import numpy as np
+    # import os
     #
-    # x, y, z = spectra_pca(data, 3, volumes, plot_data=False, x_bounds=(220, 400),
-    #                       out_path=current_directory + r"\image.png")
     #
-    # X_train, X_test, y_train, y_test = train_test_split(x[:, 0], volumes[:, 0], test_size=0.2)
+    # def ml_screening_multi_tpot(plate_path, data_path, volumes_df, out_path, plot_spectra=False, start_index=20,
+    #                             end_index=200):
+    #     # Correct data for background and blank
+    #     data_corrected = separate_subtract_and_recombine(load_data_new(data_path), load_data_new(plate_path))
     #
-    # X_train = X_train.reshape(-1,1)
-    # X_test = X_test.reshape(-1,1)
+    #     if plot_spectra:
+    #         for i in range(data_corrected.shape[0]):
+    #             # Plot the observed spectra
+    #             fig, ax = plt.subplots(figsize=(8, 5))
+    #             wavelengths = data_corrected.select_dtypes(include='number').columns.astype(float)[
+    #                           start_index:end_index]
     #
-    # regr, y_pred = linear_regression(X_train, y_train, X_test, y_test)
+    #             plt.plot(
+    #                 wavelengths,
+    #                 data_corrected.iloc[i, start_index:end_index],
+    #                 label=f'Observed Mixture Spectrum {float(volumes_df.iloc[i, 0]), float(volumes_df.iloc[i, 1]), float(volumes_df.iloc[i, 2])}',
+    #                 color='black'
+    #             )
     #
-    # fig, ax = plt.subplots()
-    # plt.scatter(x[:, 0], volumes[:, 0])
-    # plt.xlim(-1,1)
-    # # plt.savefig(current_directory+r"\wowa.png")
+    #             # Customize plot appearance
+    #             ax.spines['right'].set_visible(False)
+    #             ax.spines['top'].set_visible(False)
+    #             ax.spines['bottom'].set_visible(True)
+    #             ax.spines['left'].set_visible(True)
+    #
+    #             for axis in ['top', 'bottom', 'left', 'right']:
+    #                 ax.spines[axis].set_linewidth(0.5)
+    #
+    #             ax.minorticks_on()
+    #             ax.tick_params(axis='both', which='both', direction='in', pad=10)
+    #
+    #             ax.set_xlabel("Wavelength (nm)")
+    #             ax.set_ylabel("Absorbance")
+    #
+    #             ax.grid(True, linestyle='-', linewidth=0.2, which='major', axis='both')
+    #             ax.legend(loc='best', fontsize=8)
+    #
+    #             if out_path:
+    #                 # Create the spectra folder if it doesn’t exist
+    #                 spectra_path = os.path.join(out_path, "spectra")
+    #                 os.makedirs(spectra_path, exist_ok=True)
+    #
+    #                 # Save the plot
+    #                 plt.savefig(os.path.join(spectra_path, f"index_{i}.png"))
+    #                 plt.close()
+    #
+    #     # Load in volumes
+    #     volumes = volumes_df
+    #     volumes_abs = pd.concat([volumes, data_corrected.iloc[:, 1:]], axis=1).to_numpy()
+    #
+    #     # Correct from volume to concentration
+    #     num_analytes = volumes.shape[1] - 1  # Number of analytes from the volume DataFrame
+    #     for i in range(num_analytes):
+    #         volumes_abs[:, i] *= [0.025, 0.25, 0.5][i] / 300  # Replace with correct factors as needed
+    #
+    #     # Extract features (absorbance spectra) and targets (concentrations)
+    #     X = volumes_abs[:, start_index:end_index]  # Absorbance spectra
+    #     y = volumes_abs[:, :num_analytes]  # Concentrations for all analytes
+    #
+    #     # Split data into training and testing sets
+    #     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    #
+    #     # Normalize the features
+    #     scaler = StandardScaler()
+    #     X_train_scaled = scaler.fit_transform(X_train)
+    #     X_test_scaled = scaler.transform(X_test)
+    #
+    #     # Initialize TPOT for each analyte
+    #     tpot_models = []
+    #     metrics = {"Model": [], "R²": [], "MSE": []}
+    #
+    #     for i in range(num_analytes):
+    #         tpot = TPOTRegressor(generations=5, population_size=50, verbosity=2, random_state=42)
+    #         tpot.fit(X_train_scaled, y_train[:, i])
+    #         tpot_models.append(tpot)
+    #
+    #         # Make predictions and calculate metrics
+    #         y_pred = tpot.predict(X_test_scaled)
+    #         r2 = r2_score(y_test[:, i], y_pred)
+    #         mse = mean_squared_error(y_test[:, i], y_pred)
+    #
+    #         metrics["Model"].append(f"Analyte {i + 1}")
+    #         metrics["R²"].append(r2)
+    #         metrics["MSE"].append(mse)
+    #
+    #         # Export the best pipeline for each analyte
+    #         tpot.export(os.path.join(out_path, f"best_pipeline_analyte_{i + 1}.py"))
+    #
+    #         # Plot predictions vs actuals
+    #         plt.figure(figsize=(6, 4))
+    #         plt.scatter(y_test[:, i], y_pred, alpha=0.7, label=f"Analyte {i + 1}")
+    #         plt.plot(
+    #             [y_test[:, i].min(), y_test[:, i].max()],
+    #             [y_test[:, i].min(), y_test[:, i].max()],
+    #             "k--",
+    #             lw=2
+    #         )
+    #         plt.xlabel(f"Actual Analyte {i + 1} Concentration")
+    #         plt.ylabel(f"Predicted Analyte {i + 1} Concentration")
+    #         plt.title(f"TPOT Predictions for Analyte {i + 1}")
+    #         plt.text(
+    #             0.05, 0.9,
+    #             f"R² = {r2:.4f}\nMSE = {mse:.4f}",
+    #             transform=plt.gca().transAxes,
+    #             fontsize=10,
+    #             verticalalignment="top",
+    #             bbox=dict(facecolor="white", alpha=0.5)
+    #         )
+    #         plt.legend()
+    #         plt.savefig(os.path.join(out_path, f"predictions_vs_actuals_analyte_{i + 1}.png"))
+    #         plt.close()
+    #
+    #     # Convert metrics dictionary to a DataFrame
+    #     metrics_df = pd.DataFrame(metrics)
+    #
+    #     return tpot_models, metrics_df, scaler
+    #
+    # ml_screening_multi_tpot(plate, data, volumes, out_path, plot_spectra=False, start_index=20,
+    #                             end_index=200)

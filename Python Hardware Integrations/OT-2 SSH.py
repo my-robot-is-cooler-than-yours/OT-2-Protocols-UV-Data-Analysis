@@ -198,7 +198,7 @@ def get_file_path():
 
 if __name__ == "__main__":
     file_path = get_file_path()
-    file_name = get_file_path().split("/")[-1]
+    file_name = file_path.split("/")[-1]
     print(file_name)
 
     run_subprocess(file_path)

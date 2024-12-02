@@ -87,8 +87,8 @@ def run(protocol: protocol_api.ProtocolContext):
     r_tipracks[0].set_offset(x=0.10, y=-1.50, z=-1.00)
     l_tipracks[0].set_offset(x=0.00, y=0.70, z=0.00)
     reservoirs[0].set_offset(x=0.00, y=0.00, z=0.00)
-    plates[0].set_offset(x=1.10, y=0.10, z=-8.50)  # Please for the love of god make sure these two are set properly
-    plates[1].set_offset(x=1.60, y=0.40, z=-8.70)
+    plates[0].set_offset(x=0.90, y=0.90, z=-8.70)  # Please for the love of god make sure these two are set properly
+    plates[1].set_offset(x=1.70, y=0.80, z=-9.10)
 
     # Load pipettes
     right_pipette = protocol.load_instrument(PIPETTE_R_NAME, "right", tip_racks=r_tipracks)
@@ -119,7 +119,7 @@ def run(protocol: protocol_api.ProtocolContext):
         source_well = reservoirs[0].wells()[-(index+1)]
 
         # Distribute the volume from the specified source well to target wells
-        right_pipette.distribute(
+        left_pipette.distribute(
             volume=volumes,
             source=source_well,
             dest=target_wells_top,
