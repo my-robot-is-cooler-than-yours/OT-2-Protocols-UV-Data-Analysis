@@ -2,8 +2,8 @@ from opentrons import protocol_api
 import csv
 import json
 
-csv_path = "/data/user_storage/prd_protocols/Duplicated_Volumes.csv"
-# csv_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\10-Dec full plate + salt\Successful\Modelling\Solution_Volumes_2024-12-12 12_35_00.csv"
+csv_path = "/data/user_storage/prd_protocols/RAFT NIPAM Synthesis.csv"
+# csv_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\RAFT NIPAM Plate Synthesis\RAFT NIPAM Synthesis.csv"
 
 
 # Dictionary to hold volumes for each column
@@ -24,9 +24,10 @@ with open(csv_path, mode='r', newline="") as file:
 with open(csv_path, mode='r', newline="") as file:
     csv_reader = csv.DictReader(file)
     # Count the number of rows in the CSV file after the header
-    num_samples = sum(1 for _ in csv_reader) // 2
+    num_samples = sum(1 for _ in csv_reader)
 
 # Define constants
+print(num_samples)
 total_volume = 300  # final volume in each well
 step_size = 20  # minimum step size
 num_factors = 2  # number of variables (styrene, polystyrene)
@@ -110,11 +111,11 @@ def run(protocol: protocol_api.ProtocolContext):
         sample_wells.extend(row2)  # Add wells from the current row of slot 7 definition
 
     # Prepare target wells for experimental samples
-    target_wells = [well for pair in zip(sample_wells[::2], sample_wells[1::2]) for well in pair][:2 * num_samples]
+    target_wells = sample_wells[:num_samples]
     target_wells_bottom = [wll.bottom(well_height / 2.5) for wll in target_wells]
     target_wells_top = [wll.top() for wll in target_wells]
 
-    right_pipette.flow_rate.aspirate = 41.175*4
+    right_pipette.flow_rate.aspirate = 41.175*3
 
     # Reverse the order of the components for dispensing
     for index, (component, volumes) in enumerate(volumes_dict.items()):
@@ -124,13 +125,14 @@ def run(protocol: protocol_api.ProtocolContext):
         source_well = reservoirs[0].wells()[-(index+1)]
 
         # Distribute the volume from the specified source well to target wells
-        right_pipette.distribute(
+        right_pipette.transfer(
             volume=volumes,
             source=source_well,
             dest=target_wells_top,
             blow_out=True,
-            blowout_location="source well",
-            air_gap=20
+            blowout_location="trash",
+            air_gap=20,
+            new_tip="always"
         )
 
     protocol.comment("Protocol Finished")

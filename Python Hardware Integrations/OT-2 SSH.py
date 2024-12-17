@@ -32,7 +32,7 @@ def run_subprocess(protocol_path):
         print(f"Error output: {e.stderr}")
 
 
-def run_ssh_command(protocol_name):
+def run_execute(protocol_name):
     """
     Establish an SSH connection to the Opentrons OT-2 and execute a protocol via SSH.
     This function uses Paramiko to communicate with the OT-2, executes the given protocol, and then
@@ -203,4 +203,4 @@ if __name__ == "__main__":
 
     run_subprocess(file_path)
 
-    run_simulation(file_name)
+    run_execute(file_name)
