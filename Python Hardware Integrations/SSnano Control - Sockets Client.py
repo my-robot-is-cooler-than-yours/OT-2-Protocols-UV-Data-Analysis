@@ -93,6 +93,34 @@ class BmgCom:
             log_msg(f"Failed to get status: {e}")
             raise
 
+    def temp1(self):
+        """
+        Get the current temperature of the incubator at the bottom heating plate.
+
+        :return: String representing the current temperature of the bottom heating plate.
+        :raises: Exception if the temp1 retrieval fails.
+        """
+        try:
+            temp1 = self.com.GetInfoV("Temp1")
+            return temp1.strip() if isinstance(temp1, str) else 'unknown'
+        except Exception as e:
+            log_msg(f"Failed to get Temp1: {e}")
+            raise
+
+    def temp2(self):
+        """
+        Get the current temperature of the incubator at the top heating plate.
+
+        :return: String representing the current temperature of the top heating plate.
+        :raises: Exception if the temp2 retrieval fails.
+        """
+        try:
+            temp2 = self.com.GetInfoV("Temp2")
+            return temp2.strip() if isinstance(temp2, str) else 'unknown'
+        except Exception as e:
+            log_msg(f"Failed to get Temp2: {e}")
+            raise
+
     def plate_in(self):
         """
         Insert the plate holder into the reader.
@@ -112,7 +140,7 @@ class BmgCom:
         Eject the plate holder from the reader.
 
         :return: None
-        :raises: Exception if the plate insertion command fails.
+        :raises: Exception if the plate ejection command fails.
         """
         try:
             self.exec(['PlateOut'])
@@ -127,7 +155,7 @@ class BmgCom:
         Note that this command does not wait for the heating plates to reach the target temperature before proceeding.
 
         :return: None
-        :raises: Exception if the plate insertion command fails.
+        :raises: Exception if the set temp command fails.
         """
         try:
             self.exec(['Temp', temp])
@@ -147,7 +175,7 @@ class BmgCom:
             as these are default directories from BMG software install.
 
         :return: None
-        :raises: Exception if the plate insertion command fails.
+        :raises: Exception if the run protocol command fails.
         """
         try:
             # self.exec(['Run', name, test_path, data_path])
@@ -162,7 +190,7 @@ class BmgCom:
         Eject the plate holder from the reader.
 
         :return: None
-        :raises: Exception if the plate insertion command fails.
+        :raises: Exception if the execute command fails.
         """
         try:
             res = self.com.ExecuteAndWait(cmd)
@@ -256,7 +284,7 @@ def load_data_new(path: str, start_wavelength: int = 220, end_wavelength: int = 
     return pd.DataFrame()
 
 
-def measurements(bmg, protocol_name: str='Empty Plate Reading'):
+def measurements(bmg, protocol_name: str = 'Empty Plate Reading'):
     """
     Run a measurement protocol on the BMG SPECTROstar Nano reader.
 
@@ -271,7 +299,7 @@ def measurements(bmg, protocol_name: str='Empty Plate Reading'):
     log_msg(f"Instrument Status: {bmg.status()}")
 
     # Eject the plate
-    bmg.plate_out()
+    # bmg.plate_out()
 
     # Insert the plate
     bmg.plate_in()
@@ -289,7 +317,7 @@ def measurements(bmg, protocol_name: str='Empty Plate Reading'):
 
     bmg.run_protocol(protocol_name, test_runs_path, data_output_path)
 
-    bmg.plate_out()
+    # bmg.plate_out()
 
 
 def send_message(sock, message_type: str, message_data: str = ""):
@@ -337,9 +365,7 @@ def handle_server(bmg, s):
     :return: None
     """
     try:
-
         bmg.plate_out()
-
         while True:
             # Wait for a message from the server
             log_msg("Awaiting message from server")
@@ -347,7 +373,9 @@ def handle_server(bmg, s):
 
             if msg_type == "PLATE_BACKGROUND":
                 log_msg("Plate background requested")
+                bmg.plate_out()
                 measurements(bmg)
+                bmg.plate_out()
                 plate_bg = get_csv()
                 send_message(s, "PLATE_BACKGROUND", plate_bg)
 
@@ -355,6 +383,14 @@ def handle_server(bmg, s):
                 measurements(bmg, msg_data)
                 csv_file = get_csv()
                 send_message(s, "CSV_FILE", csv_file)
+
+            if msg_type == "GET_TEMP":
+                temp_string = f"{bmg.temp1()}, {bmg.temp2()}"
+                send_message(s, "TEMPS", temp_string)
+
+            if msg_type == "SET_TEMP":
+                bmg.set_temp(msg_data)
+                send_message(s, "OK")
 
             if msg_type == "NEXT_READING":
                 log_msg("Next sample requested.")
@@ -403,10 +439,9 @@ def client_main():
 
             handle_server(bmg, s)
 
-            bmg.plate_in()
-
-            log_msg("Disconnecting.")
+            log_msg("Disconnecting...")
             s.close()
+            log_msg("Disconnected.")
 
     except Exception as e:
         log_msg(f"An error occurred: {e}")
