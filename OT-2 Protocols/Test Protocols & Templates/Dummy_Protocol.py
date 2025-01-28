@@ -11,17 +11,13 @@ well_height = 10.9  # mm from top to bottom of well
 # Define metadata for protocol
 metadata = {
     "apiLevel": "2.19",
-    "protocolName": "DOE Mixtures - SSH",
+    "protocolName": "Dummy Protocol",
     "description": """
-    From CSV input, produces 46 unique samples of varying polymer and monomer concentrations. The first four wells are
-    intended to be used as blanks. 
+    Does nothing of interest.
     """,
     "author": "Lachlan Alexander",
-    "date last modified": "23-Oct-2024",
+    "date last modified": "23-Jan-2025",
     "change log": "Added SSH-friendly labware loading with offsets taken from OT app. "
-                  "Added dynamic volume loading from CSV loaded to OT-2 directory."
-                  "Added capability to handle dispensing into plate reader labware."
-                  "Added building block commands to work with custom plate defs."
 }
 
 # Constants

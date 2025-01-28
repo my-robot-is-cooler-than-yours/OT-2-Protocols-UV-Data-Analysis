@@ -3,7 +3,7 @@ import csv
 import json
 
 csv_path = "/data/user_storage/prd_protocols/Duplicated_Volumes.csv"
-# csv_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\Temperature Over Time\10-Dec full plate + salt\Successful\Modelling\Solution_Volumes_2024-12-12 12_35_00.csv"
+# csv_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\LCST\23-Jan full plate + salt + HCl\Duplicated_Volumes.csv"
 
 
 # Dictionary to hold volumes for each column
@@ -29,7 +29,7 @@ with open(csv_path, mode='r', newline="") as file:
 # Define constants
 total_volume = 300  # final volume in each well
 step_size = 20  # minimum step size
-num_factors = 2  # number of variables (styrene, polystyrene)
+num_factors = 3  # number of variables (styrene, polystyrene, etc)
 well_height = 10.9  # mm from top to bottom of well
 
 # Define metadata for protocol
@@ -91,11 +91,11 @@ def run(protocol: protocol_api.ProtocolContext):
                   protocol.load_labware("plate_reader_slot_7_ordered", 7)]
 
     # Load labware offsets (FROM OPENTRONS APP - PLEASE ENSURE THESE ARE FILLED BEFORE RUNNING EXECUTE)
-    r_tipracks[0].set_offset(x=0.10, y=-1.50, z=-1.00)
+    r_tipracks[0].set_offset(x=0.10, y=-1.00, z=-1.00)
     l_tipracks[0].set_offset(x=0.00, y=0.70, z=0.00)
     reservoirs[0].set_offset(x=0.00, y=0.00, z=0.00)
-    plates[0].set_offset(x=0.90, y=0.90, z=-8.70)  # Please for the love of god make sure these two are set properly
-    plates[1].set_offset(x=1.70, y=0.80, z=-9.10)
+    plates[0].set_offset(x=0.80, y=-1.90, z=-11.30)  # Please for the love of god make sure these two are set properly
+    plates[1].set_offset(x=1.40, y=-1.90, z=-11.40)
 
     # Load pipettes
     right_pipette = protocol.load_instrument(PIPETTE_R_NAME, "right", tip_racks=r_tipracks)
