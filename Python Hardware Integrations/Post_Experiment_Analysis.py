@@ -36,10 +36,11 @@ plt.rc('axes', prop_cycle=cycler('color', custom_colors))
 current_directory = os.getcwd()
 
 
-def log_msg(message):
-    """Log a message with a timestamp."""
+def log_msg(*messages, sep=' ', end='\n'):
+    """Log messages with a timestamp. Behaves similarly to print() with additional timestamp."""
     current_time = tm.strftime("%Y-%m-%d %H:%M:%S", tm.localtime())
-    print(f"[{current_time}] {message}")
+    message_str = sep.join(str(msg) for msg in messages)
+    print(f"[{current_time}] {message_str}", end=end)
 
 
 def load_data_new(path: str, start_wavelength: int = 220, end_wavelength: int = 1000) -> pd.DataFrame:
@@ -158,6 +159,123 @@ def time_difference(time1, time2):
         return (t2_delta - t1_delta).total_seconds() / 60
 
 
+def load_config_data(json_path, volumes_csv_path):
+    """Load JSON configuration data and volumes CSV"""
+    with open(json_path) as f:
+        json_data = json.load(f)
+
+    volumes_df = load_data(volumes_csv_path)
+    return json_data, volumes_df
+
+
+def process_spectra_files(folder_path):
+    """Process spectra folder to identify data files and measurement times"""
+    plate_background_path = None
+    data_paths = []
+    measurement_times = []
+
+    for idx, filename in enumerate(os.listdir(folder_path)):
+        file_path = os.path.join(folder_path, filename)
+        if os.path.isfile(file_path):
+            if idx == 0:
+                plate_background_path = file_path
+            else:
+                data_paths.append(file_path)
+                time_str = filename.split('_')[-1].split('.')[0]
+                measurement_time = datetime.strptime(time_str, "%H%M").time()
+                measurement_times.append(measurement_time)
+
+    return plate_background_path, data_paths, measurement_times
+
+
+def calculate_transmittance(data_paths, plate_background_path, idx_end, out_path):
+    """Calculate and save transmittance data for all paths"""
+    trans_dfs = []
+    abs_std_dev = []
+    full_absorbance_list = []
+    transmittance_dir = os.path.join(out_path, 'transmittance spectra')
+    os.makedirs(transmittance_dir, exist_ok=True)
+
+    for path in data_paths:
+        try:
+            plate = load_data_new(plate_background_path)
+            data = load_data_new(path)
+            corrected_array = separate_subtract_and_recombine(data, plate, 0)[600][:idx_end].to_numpy()
+            corrected_full = separate_subtract_and_recombine(data, plate, 0).to_numpy()
+            full_absorbance_list.append(corrected_full)
+
+            transmittance_array = 10 ** (-corrected_array) * 100
+            transmittance_df = pd.DataFrame(transmittance_array)
+            trans_dfs.append(transmittance_df)
+
+            # Save individual transmittance data
+            transmittance_filename = os.path.join(
+                transmittance_dir,
+                f"transmittance_{os.path.basename(path)}"
+            )
+            transmittance_df.to_csv(transmittance_filename, index=False)
+
+            # Calculate statistics
+            average = np.average(transmittance_array)
+            std = np.std(transmittance_array)
+            abs_std_dev.append((average, std))
+
+        except Exception as e:
+            log_msg(f"Error processing path {path}: {e}")
+
+    return trans_dfs, abs_std_dev, full_absorbance_list
+
+
+def prepare_all_data(json_path, volumes_csv_path, spectra_folder_path, out_path):
+    """Main data preparation function combining all steps"""
+    # Load configuration data
+    json_data, volumes_df = load_config_data(json_path, volumes_csv_path)
+
+    concentrations = []
+    for idx in range(volumes_df.shape[0]):
+        concentrations.append([volumes_df.iloc[idx, 0] * (10 / 300), volumes_df.iloc[idx, 1] * ((1 / 100) / 300),
+                               volumes_df.iloc[idx, 2] * (1 / 10000 / 300)])
+    concentrations = np.array(concentrations)
+
+    # Process spectra files
+    plate_background_path, data_paths, measurement_times = process_spectra_files(spectra_folder_path)
+
+    # Calculate transmittance data
+    trans_dfs, abs_std_dev, full_absorbance_list = calculate_transmittance(
+        data_paths, plate_background_path, 6, out_path
+    )
+
+    # Combine transmittance data
+    transmittance_dir = os.path.join(out_path, 'transmittance spectra')
+    stacked_transmittance_df = pd.concat(trans_dfs, axis=1)
+    stacked_filename = os.path.join(transmittance_dir, "stacked_transmittance.csv")
+    stacked_transmittance_df.to_csv(stacked_filename, index=False)
+
+    # Extract statistics
+    averages = [item[0] for item in abs_std_dev]
+    std_devs = [item[1] for item in abs_std_dev]
+
+    # Extract relevant JSON data
+    temps1_plotting = json_data["temps1_plotted"]
+    time_stamps = json_data["measurement_timestamps"]
+    temps1 = json_data["temps1"]
+    temps2 = json_data["temps2"]
+
+    return {
+        'stacked_transmittance_df': stacked_transmittance_df,
+        'concentrations': concentrations,
+        'averages': averages,
+        'std_devs': std_devs,
+        'measurement_times': measurement_times,
+        'temps1_plotting': temps1_plotting,
+        'volumes_df': volumes_df,
+        'full_absorbance_list': full_absorbance_list,
+        'temps1': temps1,
+        'temps2': temps2,
+        'time_stamps': time_stamps
+    }
+
+
 def plot_transmittance(plot_type, x_data, y_data, y_err=None, labels=None, title=None, xlabel=None, ylabel=None, save_name=None, out_path="."):
     """
     Generalized function to plot transmittance data.
@@ -212,7 +330,7 @@ def plot_transmittance(plot_type, x_data, y_data, y_err=None, labels=None, title
         plt.close()
 
     except Exception as e:
-        print(f"Error while plotting: {e}")  # Replace with log_msg(e) if using a logging system
+        log_msg(f"Error while plotting {title}: {e}")  # Replace with log_msg(e) if using a logging system
 
 
 def first_below_threshold_index(row):
@@ -321,7 +439,7 @@ def train_tpot_model(X_train, y_train, generations=10, population_size=75, scori
         return tpot
 
     except Exception as e:
-        print(f"An error occurred while training the model: {e}")
+        log_msg(f"An error occurred while training the model: {e}")
         return None
 
 
@@ -476,111 +594,28 @@ def generate_volumes_csv(optimal_conc, out_path, standard_conc=1000, total_vol=1
 
 
 if __name__ == "__main__":
-    with open(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\LCST\23-Jan full plate + salt + HCl\32.5 C Predicted Mixture\temperature_data_2025-01-30 15_59_41.json") as f:
-        f = json.load(f)
-        averages = f["averages"]
-        std_devs = f["std_devs"]
-        temps1_plotting = f["temps1_plotted"]
-        time_stamps = f["measurement_timestamps"]
-        temps1 = f["temps1"]
-        temps2 = f["temps2"]
-
+    # Configuration paths
     out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\LCST\23-Jan full plate + salt + HCl\32.5 C Predicted Mixture"
-    data_paths = []
-    folder_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\LCST\23-Jan full plate + salt + HCl\32.5 C Predicted Mixture\abs_spectra"
-    volumes_csv = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\LCST\23-Jan full plate + salt + HCl\32.5 C Predicted Mixture\Duplicated_Volumes.csv"
-    volumes_df = load_data(volumes_csv)
-    measurement_times = []
+    json_path = os.path.join(out_path, "temperature_data_2025-01-30 15_59_41.json")
+    volumes_csv = os.path.join(out_path, "Duplicated_Volumes.csv")
+    spectra_folder = os.path.join(out_path, "abs_spectra")
 
-    # Iterate over files in target folder
-    for idx, filename in enumerate(os.listdir(folder_path)):
-        file_path = os.path.join(folder_path, filename)
+    # Prepare all data
+    data_objects = prepare_all_data(
+        json_path=json_path,
+        volumes_csv_path=volumes_csv,
+        spectra_folder_path=spectra_folder,
+        out_path=out_path
+    )
 
-        # Check if it’s a file (and not a directory)
-        if os.path.isfile(file_path):
-            if idx == 0:
-                # Save the first file as plate background path
-                plate_background_path = file_path
-            else:
-                # Save remaining files to data_paths
-                data_paths.append(file_path)
-
-                # Extract the file name
-                file_name = os.path.basename(file_path)
-
-                # Extract the time part (last 4 characters before ".csv")
-                time_str = file_name.split('_')[-1].split('.')[0]
-
-                # Convert to a datetime.time object
-                measurement_time = datetime.strptime(time_str, "%H%M").time()
-                measurement_times.append(measurement_time)
-
-    # Post-process data to calculate transmittance and plot results
-    abs_std_dev = []
-    trans_dfs = []
-    transmittance_dir = os.path.join(out_path, 'transmittance spectra')
-    os.makedirs(transmittance_dir, exist_ok=True)
-    full_absorbance_list = []
-
-    for path in data_paths:
-        try:
-            plate = load_data_new(plate_background_path)
-            data = load_data_new(path)
-            corrected_array = separate_subtract_and_recombine(data, plate, 0)[600].to_numpy()
-            corrected_full = separate_subtract_and_recombine(data, plate, 0).to_numpy()
-            full_absorbance_list.append(corrected_full)
-
-            transmittance_array = 10 ** (-corrected_array) * 100
-            transmittance_df = pd.DataFrame(transmittance_array)
-            trans_dfs.append(transmittance_df)
-            transmittance_filename = os.path.join(transmittance_dir, f"transmittance_{os.path.basename(path)}")
-            transmittance_df.to_csv(transmittance_filename, index=False)
-
-            average = np.average(transmittance_array)
-            std = np.std(transmittance_array)
-            abs_std_dev.append((average, std))
-        except Exception as e:
-            log_msg(f"Error processing path {path}: {e}")
-
-    # Concatenate all transmittance data into a single DataFrame
-    stacked_transmittance_df = pd.concat(trans_dfs, axis=1)
-
-    # Save the combined transmittance DataFrame
-    stacked_filename = os.path.join(transmittance_dir, "stacked_transmittance.csv")
-    stacked_transmittance_df.to_csv(stacked_filename, index=False)
-
-    # Extract averages and standard deviations for plotting
-    averages = [item[0] for item in abs_std_dev]
-    std_devs = [item[1] for item in abs_std_dev]
-
-    try:
-        # Apply the function to each row in stacked_transmittance_df
-        first_below_threshold = stacked_transmittance_df.apply(first_below_threshold_index, axis=1)
-
-        log_msg(stacked_transmittance_df.shape[1])
-        log_msg(len(temps1_plotting))
-
-        temperature_values = []
-        concentrations = []
-
-        # Display the result
-        for idx, value in enumerate(first_below_threshold):
-            if pd.notna(value):  # Check if a valid integer index was found (not NaN)
-                transmittance_value = stacked_transmittance_df.iloc[idx, int(value)]
-                temperature = temps1_plotting[int(value)]
-
-                # Append values for plotting
-                temperature_values.append(temperature)
-                concentrations.append([volumes_df.iloc[idx, 0] * (10 / 300), volumes_df.iloc[idx, 1] * ((1/100) / 300), volumes_df.iloc[idx, 2] * (1/10000 / 300)])
-
-                log_msg(f"Row {idx}: Transmittance = {transmittance_value}, Temperature = {temperature}°C")
-            else:
-                log_msg(f"Row {idx}: No transmittance values below threshold")
-
-    except Exception as e:
-        log_msg(e)
-
-    concentrations = np.array(concentrations)
+    # Unpack data objects for subsequent processing
+    stacked_transmittance_df = data_objects['stacked_transmittance_df']
+    concentrations = data_objects['concentrations']
+    averages = data_objects['averages']
+    std_devs = data_objects['std_devs']
+    measurement_times = data_objects['measurement_times']
+    temps1_plotting = data_objects['temps1_plotting']
+    volumes_df = data_objects['volumes_df']
 
     # Calls for each plot type
     # Plot individual transmittances over temperature
@@ -633,7 +668,7 @@ if __name__ == "__main__":
 
     temperature_values_filtered = np.array([temp for temp in inflection_temps[4:] if temp is not None])
 
-    print(concentrations.shape, temperature_values_filtered.shape)
+    log_msg(concentrations.shape, temperature_values_filtered.shape)
 
     FEATURE_NAMES = ["Polymer", "NaCl", "HCl"]
 
