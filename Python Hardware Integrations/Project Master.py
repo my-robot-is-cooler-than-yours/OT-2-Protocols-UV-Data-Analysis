@@ -2192,7 +2192,7 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
     temps2_plotting = []
     data_paths = []
 
-    volumes_csv = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\LCST\23-Jan full plate + salt + HCl\Duplicated_Volumes.csv"
+    volumes_csv = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\LCST\23-Jan full plate + salt + HCl\32.5 C Predicted Mixture\Duplicated_Volumes.csv"
     volumes_df = load_data(volumes_csv)
 
     log_msg("Select path for data output:")
@@ -2229,10 +2229,10 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
         msg_type, msg_data = receive_message(conn)
         if msg_type == "PLATE_BACKGROUND":
             log_msg("Plate background data received.")
-            plate_background_path = msg_data
 
             # Move file to new directory
             new_path = os.path.join(abs_spectra_path, os.path.basename(msg_data))
+            plate_background_path = new_path # to prevent erroring during curve fitting this variable is assigned to the new path
             shutil.move(msg_data, new_path)
 
             log_msg(f"Plate background saved to {plate_background_path}.")
@@ -2356,30 +2356,6 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
             stabilize_and_measure(current_temp)
             current_temp -= step_size
 
-        # current_temp = 40.0
-        # stabilize_and_measure(current_temp)
-        #
-        # # Set the duration for the loop (in seconds)
-        # duration = 2 * 60 * 60  # 2 hours in seconds
-        # start_time = time.time()
-        #
-        # while time.time() - start_time < duration:
-        #     # Perform measurement
-        #     stabilize_and_measure(current_temp)
-        #     time.sleep(1)  # Sleep for 1 second between iterations
-        #
-        # log_msg("Loop finished after 2 hours.")
-        #
-        # current_temp = 30.0
-        # start_time = time.time()
-        #
-        # while time.time() - start_time < duration:
-        #     # Perform measurement
-        #     stabilize_and_measure(current_temp)
-        #     time.sleep(1)  # Sleep for 1 second between iterations
-        #
-        # log_msg("Loop finished after 2 hours.")
-
     except Exception as e:
         log_msg(f"Error during temperature measurement steps: {e}")
         return
@@ -2390,7 +2366,7 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
         transmittance_dir = os.path.join(out_path, 'transmittance spectra')
         os.makedirs(transmittance_dir, exist_ok=True)
 
-        for path in data_paths:
+        for path in data_paths: # note that background is not in data_paths or at least shouldn't be
             try:
                 plate = load_data_new(plate_background_path)
                 data = load_data_new(path)
@@ -2434,7 +2410,7 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
         first_below_threshold = stacked_transmittance_df.apply(first_below_threshold_index, axis=1)
 
         log_msg(stacked_transmittance_df.shape[1])
-        log_msg(len(temps1_plotting))
+        log_msg(len(temps1_plotting)) # should be the same num cols
 
         temperature_values = []
         concentrations = []
@@ -2733,110 +2709,6 @@ def temperature_over_time_ref(conn, user_name: str = "Lachlan"):
         plt.close()
     except Exception as e:
         log_msg(e)
-
-    # ### TPOT Predictor & Pipeline Optimisation
-    # # Convert to numpy arrays
-    # X = np.array(concentrations_filtered).reshape(-1, 1)  # Reshape for a single feature
-    # y = np.array(temperature_values_filtered)
-    #
-    # # Train/test split
-    # X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    #
-    # # Train a TPOTRegressor
-    # tpot = TPOTRegressor(generations=10, population_size=75, verbosity=2, random_state=42, scoring="r2")
-    # tpot.fit(X_train, y_train)
-    #
-    # # Evaluate on the test set
-    # y_pred = tpot.predict(X_test)
-    # r2 = r2_score(y_test, y_pred)
-    # mse = mean_squared_error(y_test, y_pred)
-    #
-    # log_msg(f"Optimized model R²: {r2:.4f}")
-    # log_msg(f"Optimized model MSE: {mse:.4f}")
-    #
-    # # Plot predicted vs actual
-    # fig, ax = plt.subplots(figsize=(10, 6))
-    # ax.scatter(y_pred, y_test, marker="o", color="#41424C", s=60)
-    #
-    # # Add a diagonal line to indicate perfect prediction
-    # min_val = min(min(y_test), min(y_pred))
-    # max_val = max(max(y_test), max(y_pred))
-    # ax.plot([min_val, max_val], [min_val, max_val], 'k--', lw=2, label="Ideal Prediction Line")
-    #
-    # # Customize plot
-    # ax.set_xlabel("Predicted Temperature (°C) at <50% Transmittance", fontsize=14, labelpad=10)
-    # ax.set_ylabel("Actual Temperature (°C) at <50% Transmittance", fontsize=14, labelpad=10)
-    # ax.set_title("Actual vs. Predicted Temperature at <50% Transmittance", fontsize=16, pad=15)
-    #
-    # # Add metrics as text on the plot
-    # ax.text(0.05, 0.9, f'R² = {r2:.4f}\nMSE = {mse:.4f}',
-    #         transform=ax.transAxes, fontsize=12, verticalalignment='top',
-    #         bbox=dict(facecolor='white', alpha=0.8))
-    #
-    # ax.legend(loc='best', fontsize=10)
-    # ax.grid(False)
-    #
-    # # Save plot
-    # plt.tight_layout()
-    # plt.savefig(os.path.join(out_path, "predicted_vs_actual_temperature.png"), dpi=300)
-    # plt.close()
-    #
-    # # Export the optimized pipeline
-    # pipeline_path = os.path.join(out_path, "tpot_optimized_pipeline.py")
-    # tpot.export(pipeline_path)
-    # log_msg(f"Optimized pipeline exported to {pipeline_path}")
-    #
-    # ### TPOT Predictor & Pipeline Optimisation - Hysteresis
-    # # Convert to numpy arrays
-    # X = np.array(concentrations_filtered).reshape(-1, 1)  # Reshape for a single feature
-    # y = np.array(hyst_temperature_values_filtered)
-    #
-    # # Train/test split
-    # X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    #
-    # # Train a TPOTRegressor
-    # tpot = TPOTRegressor(generations=10, population_size=75, verbosity=2, random_state=42, scoring="r2")
-    # tpot.fit(X_train, y_train)
-    #
-    # # Evaluate on the test set
-    # y_pred = tpot.predict(X_test)
-    # r2 = r2_score(y_test, y_pred)
-    # mse = mean_squared_error(y_test, y_pred)
-    #
-    # log_msg(f"Optimized model R²: {r2:.4f}")
-    # log_msg(f"Optimized model MSE: {mse:.4f}")
-    #
-    # # Plot predicted vs actual
-    # fig, ax = plt.subplots(figsize=(10, 6))
-    # ax.scatter(y_pred, y_test, marker="o", color="#41424C", s=60)
-    #
-    # # Add a diagonal line to indicate perfect prediction
-    # min_val = min(min(y_test), min(y_pred))
-    # max_val = max(max(y_test), max(y_pred))
-    # ax.plot([min_val, max_val], [min_val, max_val], 'k--', lw=2, label="Ideal Prediction Line")
-    #
-    # # Customize plot
-    # ax.set_xlabel("Predicted Temperature (°C) at >50% Transmittance", fontsize=14, labelpad=10)
-    # ax.set_ylabel("Actual Temperature (°C) at >50% Transmittance", fontsize=14, labelpad=10)
-    # ax.set_title("Actual vs. Predicted Temperature at >50% Transmittance (Hysteresis)", fontsize=16, pad=15)
-    #
-    # # Add metrics as text on the plot
-    # ax.text(0.05, 0.9, f'R² = {r2:.4f}\nMSE = {mse:.4f}',
-    #         transform=ax.transAxes, fontsize=12, verticalalignment='top',
-    #         bbox=dict(facecolor='white', alpha=0.8))
-    #
-    # ax.legend(loc='best', fontsize=10)
-    # ax.grid(False)
-    #
-    # # Save plot
-    # plt.tight_layout()
-    # plt.savefig(os.path.join(out_path, "predicted_vs_actual_temperature_hysteresis.png"), dpi=300)
-    # plt.close()
-    #
-    # # Export the optimized pipeline
-    # pipeline_path = os.path.join(out_path, "tpot_optimized_pipeline_hysteresis.py")
-    # tpot.export(pipeline_path)
-    # log_msg(f"Optimized pipeline exported to {pipeline_path}")
 
     ### Plot temperature of heating plates over time
     try:
