@@ -6,6 +6,9 @@ import json
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FormatStrFormatter
+from mpl_toolkits.mplot3d import Axes3D
+import seaborn as sns
 from datetime import datetime
 from matplotlib.ticker import AutoMinorLocator
 from datetime import time, timedelta
@@ -15,11 +18,15 @@ from tpot import TPOTRegressor
 from sklearn.inspection import PartialDependenceDisplay, permutation_importance
 from scipy.optimize import minimize_scalar
 import os
-import joblib
+from xgboost import XGBRegressor
+import logging
+from sklearn.svm import SVR
+from scipy.stats import randint, uniform, reciprocal
+from sklearn.model_selection import RandomizedSearchCV
 
 # Set plotting parameters globally
 mpl.rcParams['figure.dpi'] = 600
-mpl.rcParams['font.family'] = 'Times New Roman'
+mpl.rcParams['font.family'] = 'Arial'
 
 # Define a custom color palette
 custom_colors = [
@@ -188,7 +195,7 @@ def process_spectra_files(folder_path):
     return plate_background_path, data_paths, measurement_times
 
 
-def calculate_transmittance(data_paths, plate_background_path, idx_end, out_path):
+def calculate_transmittance(data_paths, plate_background_path, idx_start, idx_end, wavelength_start, wavelength_end, out_path):
     """Calculate and save transmittance data for all paths"""
     trans_dfs = []
     abs_std_dev = []
@@ -198,9 +205,9 @@ def calculate_transmittance(data_paths, plate_background_path, idx_end, out_path
 
     for path in data_paths:
         try:
-            plate = load_data_new(plate_background_path)
-            data = load_data_new(path)
-            corrected_array = separate_subtract_and_recombine(data, plate, 0)[600][:idx_end].to_numpy()
+            plate = load_data_new(plate_background_path, wavelength_start, wavelength_end)
+            data = load_data_new(path, wavelength_start, wavelength_end)
+            corrected_array = separate_subtract_and_recombine(data, plate, 0)[600][idx_start:idx_end].to_numpy()
             corrected_full = separate_subtract_and_recombine(data, plate, 0).to_numpy()
             full_absorbance_list.append(corrected_full)
 
@@ -226,7 +233,7 @@ def calculate_transmittance(data_paths, plate_background_path, idx_end, out_path
     return trans_dfs, abs_std_dev, full_absorbance_list
 
 
-def prepare_all_data(json_path, volumes_csv_path, spectra_folder_path, out_path):
+def prepare_all_data(json_path, volumes_csv_path, spectra_folder_path, out_path, idx_start, idx_end, wavelength_start, wavelength_end):
     """Main data preparation function combining all steps"""
     # Load configuration data
     json_data, volumes_df = load_config_data(json_path, volumes_csv_path)
@@ -234,7 +241,7 @@ def prepare_all_data(json_path, volumes_csv_path, spectra_folder_path, out_path)
     concentrations = []
     for idx in range(volumes_df.shape[0]):
         concentrations.append([volumes_df.iloc[idx, 0] * (10 / 300), volumes_df.iloc[idx, 1] * ((1 / 100) / 300),
-                               volumes_df.iloc[idx, 2] * (1 / 10000 / 300)])
+                               volumes_df.iloc[idx, 2] * ((1 / 100000) / 300)])
     concentrations = np.array(concentrations)
 
     # Process spectra files
@@ -242,7 +249,7 @@ def prepare_all_data(json_path, volumes_csv_path, spectra_folder_path, out_path)
 
     # Calculate transmittance data
     trans_dfs, abs_std_dev, full_absorbance_list = calculate_transmittance(
-        data_paths, plate_background_path, 6, out_path
+        data_paths, plate_background_path, idx_start, idx_end, wavelength_start, wavelength_end, out_path
     )
 
     # Combine transmittance data
@@ -333,6 +340,235 @@ def plot_transmittance(plot_type, x_data, y_data, y_err=None, labels=None, title
         log_msg(f"Error while plotting {title}: {e}")  # Replace with log_msg(e) if using a logging system
 
 
+def create_heatmap(
+        data,
+        num_initial_nans=4,
+        reshape_shape=(8, 12),
+        rows=None,
+        columns=None,
+        title="Measured LCST Values Per Well",
+        filename="heatmap_bubble.png",
+        figsize=(10, 6),
+        cmap="magma",
+        edgecolors="#D3D3D3",
+        s=1100,
+        dpi=300,
+        fontsize_labels=12,
+        fontsize_title=16,
+        colorbar_fontsize=10,
+        **kwargs
+):
+    """
+    Generates a bubble heatmap from 1D data array with configurable parameters.
+
+    Parameters:
+        data (array-like): Input 1D data array
+        num_initial_nans (int): Number of initial values to set as NaN
+        reshape_shape (tuple): Target shape for heatmap grid (rows, cols)
+        rows/columns (list): Labels for rows/columns
+        title/filename (str): Plot title and output path
+        figsize (tuple): Figure dimensions
+        cmap/edgecolors: Colormap and edge colors for bubbles
+        s (int): Bubble size
+        dpi (int): Output image resolution
+        fontsize_*: Font size controls
+        **kwargs: Additional arguments for matplotlib.scatter
+    """
+    data_modified = data.copy()
+    data_modified[:num_initial_nans] = np.nan
+    data_reshaped = data_modified.reshape(reshape_shape)
+
+    # Generate labels if not provided
+    rows = rows or [chr(ord('A') + i) for i in range(reshape_shape[0])]
+    columns = columns or np.arange(1, reshape_shape[1] + 1)
+
+    df = pd.DataFrame(data_reshaped, index=rows, columns=columns)
+
+    fig, ax = plt.subplots(figsize=figsize)
+    row_indices = np.arange(len(rows))
+    col_indices = np.arange(len(columns))
+
+    # Create plotting coordinates
+    x, y = np.meshgrid(col_indices, row_indices)
+    x, y = x.flatten(), y.flatten()
+    values = df.to_numpy().flatten()
+
+    # Normalize colormap excluding initial NaNs
+    valid_values = values[num_initial_nans:]
+    norm = plt.Normalize(
+        vmin=np.nanmin(valid_values),
+        vmax=np.nanmax(valid_values)
+    )
+
+    # Generate heatmap bubbles
+    scatter = ax.scatter(
+        x, y, s=s, c=values, cmap=cmap, norm=norm,
+        edgecolors=edgecolors, **kwargs
+    )
+
+    # Configure axis appearance
+    ax.set_xticks(col_indices)
+    ax.set_xticklabels(columns, fontsize=fontsize_labels)
+    ax.set_yticks(row_indices)
+    ax.set_yticklabels(rows, fontsize=fontsize_labels)
+    ax.tick_params(left=False, bottom=False)
+    ax.set_title(title, fontsize=fontsize_title)
+    ax.invert_yaxis()
+    ax.set_frame_on(False)
+
+    # Add colorbar
+    cbar = plt.colorbar(scatter, ax=ax, fraction=0.02, pad=0.04)
+    cbar.ax.tick_params(labelsize=colorbar_fontsize)
+
+    plt.tight_layout()
+    plt.savefig(filename, dpi=dpi)
+    plt.close()
+
+
+def create_boxplot(
+        data,
+        num_initial_excluded=4,
+        names=None,
+        title="LCST Distribution Across All Samples",
+        filename="box_plot.png",
+        figsize=(6, 8),
+        ylabel="LCST (°C)",
+        yticks_count=10,
+        ytick_format='%.2f',
+        box_facecolor="#D3D3D3",
+        median_color="grey",
+        dpi=300,
+        fontsize_labels=12,
+        fontsize_title=16,
+        fontsize_ylabel=14,
+        **kwargs
+):
+    """
+    Generates box plots from dataset(s) with configurable parameters.
+
+    Parameters:
+        data (array-like or list): Input data (1D array or list of arrays)
+        num_initial_excluded (int): Number of initial values to exclude per dataset
+        names (list): Optional names for x-axis labels
+        title/filename (str): Plot title and output path
+        figsize (tuple): Figure dimensions
+        ylabel (str): Y-axis label text
+        yticks_count (int): Number of y-axis ticks
+        ytick_format (str): Format string for y-axis
+        box_facecolor/median_color: Styling parameters
+        dpi (int): Output image resolution
+        fontsize_*: Font size controls
+        **kwargs: Additional arguments for matplotlib.boxplot
+    """
+    # Convert input to list of datasets
+    if isinstance(data, np.ndarray):
+        if data.ndim == 1:
+            datasets = [data]
+        else:
+            datasets = [data[i] for i in range(data.shape[0])]
+    elif not isinstance(data, (list, tuple)):
+        datasets = [data]
+    else:
+        datasets = data
+
+    # Process datasets
+    processed_data = []
+    for dataset in datasets:
+        data_modified = np.array(dataset).copy()[num_initial_excluded:]
+        processed_data.append(data_modified.flatten())
+
+    # Handle empty case
+    if not processed_data:
+        raise ValueError("No valid data provided")
+
+    # Generate x-axis labels
+    if names is None:
+        names = ["All Wells"] if len(processed_data) == 1 else \
+            [str(i + 1) for i in range(len(processed_data))]
+    elif len(names) != len(processed_data):
+        raise ValueError("Names length must match number of datasets")
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Box plot styling
+    boxprops = dict(facecolor=box_facecolor, color="grey")
+    medianprops = dict(color=median_color, linewidth=2)
+
+    # Create box plots
+    ax.boxplot(
+        processed_data,
+        patch_artist=True,
+        notch=False,
+        boxprops=boxprops,
+        medianprops=medianprops,
+        **kwargs
+    )
+
+    # Axis configuration
+    ax.set_xticks(np.arange(1, len(processed_data) + 1))
+    ax.set_xticklabels(names, fontsize=fontsize_labels)
+    ax.set_ylabel(ylabel, fontsize=fontsize_ylabel)
+
+    # Y-axis formatting
+    all_values = np.concatenate(processed_data)
+    y_min, y_max = np.nanmin(all_values), np.nanmax(all_values)
+    ax.set_yticks(np.linspace(y_min, y_max, yticks_count))
+    ax.yaxis.set_major_formatter(FormatStrFormatter(ytick_format))
+
+    ax.set_title(title, fontsize=fontsize_title)
+    plt.grid(False)
+    plt.tight_layout()
+    plt.savefig(filename, dpi=dpi)
+    plt.close()
+
+
+def plot_3d_trisurf(x, y, z, lcst_values, title=None, xlabel=None, ylabel=None, zlabel=None, save_name=None):
+    """
+    Plots a 3D surface using trisurf with LCST values mapped to color.
+
+    Args:
+        x (array-like): X-axis data (e.g., concentration of component 1).
+        y (array-like): Y-axis data (e.g., concentration of component 2).
+        z (array-like): Z-axis data (e.g., concentration of component 3).
+        lcst_values (array-like): LCST values used for color mapping.
+        title (str, optional): Plot title.
+        xlabel (str, optional): Label for the x-axis.
+        ylabel (str, optional): Label for the y-axis.
+        zlabel (str, optional): Label for the z-axis.
+        save_name (str, optional): Filename to save the plot.
+        out_path (str, optional): Path for saving the figure.
+    """
+    try:
+        fig = plt.figure(figsize=(10, 7))
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Normalize LCST values for color mapping
+        norm = plt.Normalize(lcst_values.min(), lcst_values.max())
+        colors = plt.cm.plasma(norm(lcst_values))  # Apply colormap
+
+        # Plot the surface using Delaunay triangulation
+        surf = ax.plot_trisurf(x, y, z, cmap='plasma', linewidth=0.2, edgecolor='k', alpha=0.9)
+
+        # Add color bar
+        mappable = plt.cm.ScalarMappable(cmap='plasma', norm=norm)
+        cbar = fig.colorbar(mappable, ax=ax, shrink=0.6, aspect=10)
+        cbar.set_label("LCST (°C)", fontsize=12)
+
+        # Set labels and title
+        ax.set_xlabel(xlabel, fontsize=14, labelpad=10)
+        ax.set_ylabel(ylabel, fontsize=14, labelpad=10)
+        ax.set_zlabel(zlabel, fontsize=14, labelpad=10)
+        ax.set_title(title, fontsize=16, pad=15)
+
+        # Save the figure if needed
+        if save_name:
+            plt.savefig(f"{save_name}", dpi=300)
+        plt.show()
+
+    except Exception as e:
+        print(f"Error in plotting 3D surface: {e}")
+
 def first_below_threshold_index(row):
         # Iterate over the row with index and return the first index where value < threshold
         for idx, value in enumerate(row):
@@ -385,7 +621,7 @@ def fit_sigmoidal_and_plot(temperature, transmittance):
     # Customize axis labels and title
     ax.set_xlabel("Temperature (°C)", fontsize=14, labelpad=10)
     ax.set_ylabel("Average Transmittance (%)", fontsize=14, labelpad=10)
-    ax.set_title("Turbidity Curves for Transmittance vs. Temperature for p(NIPAM), NaCl, and HCl in Water", fontsize=16, pad=15)
+    ax.set_title("Turbidity Curves for Predicted LCST of 32.5 °C", fontsize=16, pad=15)
 
     # Adjust ticks and add minor locators
     ax.xaxis.set_minor_locator(AutoMinorLocator(2))
@@ -407,6 +643,130 @@ def prepare_data(concentrations, temperature_values, test_size=0.2, random_state
     X = np.array(concentrations)
     y = np.array(temperature_values)
     return train_test_split(X, y, test_size=test_size, random_state=random_state)
+
+
+def train_xgboost_model(X_train, y_train, generations=10, population_size=75, scoring="r2",
+                        random_state=42, cv=5, n_jobs=-1):
+    """
+    Train and optimize hyperparameters for an XGBoost model using randomized search.
+
+    Args:
+        X_train (array-like): Training data for features
+        y_train (array-like): Training data for target variable
+        generations (int, optional): Number of generations (used to calculate n_iter). Default 10
+        population_size (int, optional): Population size per generation (used to calculate n_iter). Default 75
+        scoring (str, optional): Scoring metric to optimize. Default "r2"
+        random_state (int, optional): Seed for reproducibility. Default 42
+        cv (int, optional): Number of cross-validation folds. Default 5
+        n_jobs (int, optional): Number of parallel jobs. Default -1 (all cores)
+
+    Returns:
+        RandomizedSearchCV: Optimized search object containing best model
+    """
+    try:
+        # Calculate total iterations based on TPOT-like parameters
+        n_iter = generations * population_size
+
+        # Define hyperparameter distributions
+        param_dist = {
+            'n_estimators': randint(100, 1000),
+            'max_depth': randint(3, 10),
+            'learning_rate': uniform(0.01, 0.3),
+            'subsample': uniform(0.6, 0.4),  # Range 0.6-1.0
+            'colsample_bytree': uniform(0.6, 0.4),  # Range 0.6-1.0
+            'gamma': uniform(0, 0.5),  # Regularization
+            'reg_alpha': uniform(0, 1),  # L1 regularization
+            'reg_lambda': uniform(0, 1)  # L2 regularization
+        }
+
+        # Initialize base model
+        xgb = XGBRegressor(random_state=random_state, n_jobs=n_jobs)
+
+        # Set up randomized search
+        search = RandomizedSearchCV(
+            estimator=xgb,
+            param_distributions=param_dist,
+            n_iter=n_iter,
+            scoring=scoring,
+            cv=cv,
+            verbose=2,
+            random_state=random_state,
+            n_jobs=n_jobs,
+            return_train_score=True
+        )
+
+        # Perform hyperparameter optimization
+        search.fit(X_train, y_train)
+
+        logging.info(f"Best parameters: {search.best_params_}")
+        logging.info(f"Best {scoring} score: {search.best_score_:.3f}")
+
+        return search
+
+    except Exception as e:
+        logging.error(f"An error occurred during model training: {str(e)}")
+        return None
+
+
+def train_svr_model(X_train, y_train, generations=2, population_size=75, scoring="r2",
+                    random_state=42, cv=5, n_jobs=-1):
+    """
+    Train and optimize hyperparameters for a Support Vector Regression (SVR) model using randomized search.
+
+    Args:
+        X_train (array-like): Training data for features
+        y_train (array-like): Training data for target variable
+        generations (int, optional): Number of generations (used to calculate n_iter). Default 10
+        population_size (int, optional): Population size per generation (used to calculate n_iter). Default 75
+        scoring (str, optional): Scoring metric to optimize. Default "r2"
+        random_state (int, optional): Seed for reproducibility. Default 42
+        cv (int, optional): Number of cross-validation folds. Default 5
+        n_jobs (int, optional): Number of parallel jobs. Default -1 (all cores)
+
+    Returns:
+        RandomizedSearchCV: Optimized search object containing best model
+    """
+    try:
+        # Calculate total iterations based on TPOT-like parameters
+        n_iter = generations * population_size
+
+        # Define hyperparameter distributions
+        param_dist = {
+            'kernel': ['rbf', 'linear', 'poly', 'sigmoid'],
+            'C': reciprocal(1e-3, 1e3),  # Log-uniform distribution for C
+            'gamma': reciprocal(1e-5, 1e3),  # Log-uniform distribution for gamma
+            'epsilon': uniform(0.01, 0.5),  # Uniform distribution between 0.01 and 0.51
+            'degree': randint(2, 5),  # Integer values 2, 3, 4
+            'coef0': uniform(-1, 2)  # Uniform distribution between -1 and 1
+        }
+
+        # Initialize base model
+        svr = SVR()
+
+        # Set up randomized search
+        search = RandomizedSearchCV(
+            estimator=svr,
+            param_distributions=param_dist,
+            n_iter=n_iter,
+            scoring=scoring,
+            cv=cv,
+            verbose=2,
+            random_state=random_state,
+            n_jobs=n_jobs,
+            return_train_score=True
+        )
+
+        # Perform hyperparameter optimization
+        search.fit(X_train, y_train)
+
+        logging.info(f"Best parameters: {search.best_params_}")
+        logging.info(f"Best {scoring} score: {search.best_score_:.3f}")
+
+        return search
+
+    except Exception as e:
+        logging.error(f"An error occurred during model training: {str(e)}")
+        return None
 
 
 def train_tpot_model(X_train, y_train, generations=10, population_size=75, scoring="r2", random_state=42):
@@ -484,7 +844,7 @@ def generate_model_insights(model, X_train, X_test, y_test, insight_out_path, fe
     # Partial Dependence Plots
     try:
         fig, ax = plt.subplots(figsize=(12, 8))
-        PartialDependenceDisplay.from_estimator(model.fitted_pipeline_, X_train, features=[0, 1, 2], ax=ax)
+        PartialDependenceDisplay.from_estimator(model, X_train, features=[0, 1, 2], ax=ax)
         ax.set_title("Partial Dependence Plots", fontsize=16)
         plt.savefig(os.path.join(insight_out_path, "partial_dependence.png"), dpi=300)
         plt.close()
@@ -493,7 +853,7 @@ def generate_model_insights(model, X_train, X_test, y_test, insight_out_path, fe
 
     # Permutation Importance
     try:
-        result = permutation_importance(model.fitted_pipeline_, X_test, y_test, n_repeats=30, random_state=42)
+        result = permutation_importance(model, X_test, y_test, n_repeats=30, random_state=42)
         sorted_idx = result.importances_mean.argsort()[::-1]
 
         plt.figure(figsize=(12, 8))
@@ -529,7 +889,7 @@ def generate_model_insights(model, X_train, X_test, y_test, insight_out_path, fe
             grid_points[:, fixed_var_index] = fixed_value
 
             # Predict using the model
-            predictions = model.fitted_pipeline_.predict(grid_points).reshape(var1_mesh.shape)
+            predictions = model.predict(grid_points).reshape(var1_mesh.shape)
 
             # Create the contour plot
             fig, ax = plt.subplots(figsize=(12, 8))
@@ -595,17 +955,21 @@ def generate_volumes_csv(optimal_conc, out_path, standard_conc=1000, total_vol=1
 
 if __name__ == "__main__":
     # Configuration paths
-    out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\LCST\23-Jan full plate + salt + HCl\32.5 C Predicted Mixture"
-    json_path = os.path.join(out_path, "temperature_data_2025-01-30 15_59_41.json")
-    volumes_csv = os.path.join(out_path, "Duplicated_Volumes.csv")
-    spectra_folder = os.path.join(out_path, "abs_spectra")
+    out_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\LCST\23-Jan full plate + 0.01M salt + HCl\Graphing Test"
+    json_path = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\LCST\23-Jan full plate + 0.01M salt + HCl\temperature_data_2025-01-23 16_38_52.json"
+    volumes_csv = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\LCST\23-Jan full plate + 0.01M salt + HCl\Duplicated_Volumes_1.csv"
+    spectra_folder = r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\LCST\23-Jan full plate + 0.01M salt + HCl\abs spectra"
 
     # Prepare all data
     data_objects = prepare_all_data(
         json_path=json_path,
         volumes_csv_path=volumes_csv,
         spectra_folder_path=spectra_folder,
-        out_path=out_path
+        out_path=out_path,
+        idx_start=None,
+        idx_end=None,
+        wavelength_start=220,
+        wavelength_end=1000,
     )
 
     # Unpack data objects for subsequent processing
@@ -617,77 +981,110 @@ if __name__ == "__main__":
     temps1_plotting = data_objects['temps1_plotting']
     volumes_df = data_objects['volumes_df']
 
-    # Calls for each plot type
-    # Plot individual transmittances over temperature
-    plot_transmittance(
-        plot_type="individual",
-        x_data=temps1_plotting,
-        y_data=stacked_transmittance_df.iloc[:, 1:],
-        labels=[f"{round(volumes_df.iloc[i, 0] * (10 / 300), 2)} mg/mL" for i in range(len(stacked_transmittance_df))],
-        title='Percent Transmittance at 600 nm of p(NIPAM), NaCl, and HCl in Water vs. Temperature',
-        xlabel="Temperature (°C)",
-        ylabel='Average Transmittance (%)',
-        save_name="trans_versus_temp_individual.png",
-        out_path=out_path
-    )
-
-    # Plot individual transmittances over time
-    try:
-        times = [time_difference(measurement_times[0], t) for t in measurement_times]
-    except Exception as e:
-        log_msg(e)
-
-    plot_transmittance(
-        plot_type="individual",
-        x_data=times,
-        y_data=stacked_transmittance_df,
-        labels=[f"{round(volumes_df.iloc[i, 0] * (10 / 300), 2)} mg/mL" for i in range(len(stacked_transmittance_df))],
-        title='Percent Transmittance at 600 nm of p(NIPAM), NaCl, and HCl in Water vs. Time',
-        xlabel="Time (Seconds)",
-        ylabel='Average Transmittance (%)',
-        save_name="trans_versus_time_individual.png",
-        out_path=out_path
-    )
-
-    # Plot averaged transmittances over temperature
-    plot_transmittance(
-        plot_type="averaged",
-        x_data=temps1_plotting[:len(averages)//2],
-        y_data=averages[:len(averages)//2],
-        y_err=std_devs[:len(averages)//2],
-        title='Percent Transmittance at 600 nm of p(NIPAM), NaCl, and HCl in Water vs. Temperature',
-        xlabel="Temperature (°C)",
-        ylabel='Average Transmittance (%)',
-        save_name="trans_versus_temp_averaged.png",
-        out_path=out_path
-    )
+    # # Calls for each plot type
+    # # Plot individual transmittances over temperature
+    # plot_transmittance(
+    #     plot_type="individual",
+    #     x_data=temps1_plotting,
+    #     y_data=stacked_transmittance_df.iloc[:, 1:],
+    #     labels=[f"{round(volumes_df.iloc[i, 0] * (10 / 300), 2)} mg/mL" for i in range(len(stacked_transmittance_df))],
+    #     title='Percent Transmittance at 600 nm of p(NIPAM), NaCl, and HCl in Water vs. Temperature',
+    #     xlabel="Temperature (°C)",
+    #     ylabel='Average Transmittance (%)',
+    #     save_name="trans_versus_temp_individual.png",
+    #     out_path=out_path
+    # )
+    #
+    # # Plot individual transmittances over time
+    # try:
+    #     times = [time_difference(measurement_times[0], t) for t in measurement_times]
+    # except Exception as e:
+    #     log_msg(e)
+    #
+    # plot_transmittance(
+    #     plot_type="individual",
+    #     x_data=times,
+    #     y_data=stacked_transmittance_df,
+    #     labels=[f"{round(volumes_df.iloc[i, 0] * (10 / 300), 2)} mg/mL" for i in range(len(stacked_transmittance_df))],
+    #     title='Percent Transmittance at 600 nm of p(NIPAM), NaCl, and HCl in Water vs. Time',
+    #     xlabel="Time (Seconds)",
+    #     ylabel='Average Transmittance (%)',
+    #     save_name="trans_versus_time_individual.png",
+    #     out_path=out_path
+    # )
+    #
+    # # Plot averaged transmittances over temperature
+    # plot_transmittance(
+    #     plot_type="averaged",
+    #     x_data=temps1_plotting[:len(averages)//2],
+    #     y_data=averages[:len(averages)//2],
+    #     y_err=std_devs[:len(averages)//2],
+    #     title='Percent Transmittance at 600 nm of p(NIPAM), NaCl, and HCl in Water vs. Temperature',
+    #     xlabel="Temperature (°C)",
+    #     ylabel='Average Transmittance (%)',
+    #     save_name="trans_versus_temp_averaged.png",
+    #     out_path=out_path
+    # )
 
     temperature = temps1_plotting[:len(temps1_plotting) // 2]
     transmittance = stacked_transmittance_df
     fit_sigmoidal_and_plot(temperature, transmittance)
 
-    temperature_values_filtered = np.array([temp for temp in inflection_temps[4:] if temp is not None])
+    temperature_values_filtered = np.array([temp for temp in inflection_temps[:] if temp is not None])
 
     log_msg(concentrations.shape, temperature_values_filtered.shape)
 
-    FEATURE_NAMES = ["Polymer", "NaCl", "HCl"]
+    create_heatmap(
+        temperature_values_filtered,
+        figsize=(9, 6),
+        filename=r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\LCST\10-Dec full plate + salt\Successful\Test Plots\heatmap_new"
+    )
 
-    # Load and prepare data
-    X_train, X_test, y_train, y_test = prepare_data(concentrations, temperature_values_filtered)
+    # Datasets with names
+    datasets = [
+        temperature_values_filtered
+    ]
+    create_boxplot(
+        datasets,
+        names=["PNIPAM DP60"],
+        figsize=(6, 8),
+        filename=r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\LCST\10-Dec full plate + salt\Successful\Test Plots\boxplot_new"
+    )
 
-    # Train model
-    model = train_tpot_model(X_train, y_train)
+    # plot_3d_trisurf(
+    #     x=concentrations[:, 0],
+    #     y=concentrations[:, 1],
+    #     z=concentrations[:, 2],
+    #     lcst_values=temperature_values_filtered,
+    #     title="3D Transmittance Surface",
+    #     xlabel="[Polymer]",
+    #     ylabel="[NaCl]",
+    #     zlabel="[HCl]",
+    #     save_name="transmittance_3d.png"
+    # )
 
-    # Evaluate and export
-    evaluate_model(model, X_test, y_test, out_path)
-    export_pipeline(model, out_path)
+    # FEATURE_NAMES = ["Polymer", "NaCl", "HCl"]
+    #
+    # # Load and prepare data
+    # X_train, X_test, y_train, y_test = prepare_data(concentrations[4:, :], temperature_values_filtered[4:])
+    #
+    # # Train model
+    # # model = train_tpot_model(X_train, y_train).fitted_pipeline_
+    # result = train_xgboost_model(X_train, y_train)
+    # model = result.best_estimator_
+    #
+    # # Evaluate and export
+    # evaluate_model(model, X_test, y_test, out_path)
+    # # export_pipeline(model, out_path)
+    #
+    # # Generate insights
+    # generate_model_insights(model, X_train, X_test, y_test,
+    #                         os.path.join(out_path, "insights"), FEATURE_NAMES)
+    #
+    # # Optimization and solution generation
+    # bounds = (X_train[:, 0].min(), X_train[:, 0].max())
+    # target_LCST = 32.5  # Target temperature
+    # optimal = optimize_concentration(model, target_LCST, bounds=(0, 5))
+    # if optimal:
+    #     generate_volumes_csv(optimal, out_path)
 
-    # Generate insights
-    generate_model_insights(model, X_train, X_test, y_test,
-                            os.path.join(out_path, "insights"), FEATURE_NAMES)
-
-    # Optimization and solution generation
-    target = 32.5  # Target temperature
-    optimal = optimize_concentration(model, target)
-    if optimal:
-        generate_volumes_csv(optimal, out_path)
