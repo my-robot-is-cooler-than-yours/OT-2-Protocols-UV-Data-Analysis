@@ -201,7 +201,7 @@ if __name__ == "__main__":
     # file_name = file_path.split("/")[-1]
     # print(file_name)
 
-    run_subprocess(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\LCST\23-Jan full plate + salt + HCl\32.5 C Predicted Mixture\Duplicated_Volumes.csv")
+    # run_subprocess(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Experiments\LCST\23-Jan full plate + salt + HCl\32.5 C Predicted Mixture\Duplicated_Volumes.csv")
     run_subprocess(r"C:\Users\Lachlan Alexander\Desktop\Uni\2024 - Honours\Honours Python Main\OT-2 Protocols\DoE + Monomers Experiment\Mixtures Multivariable.py")
 
-    run_simulation("Mixtures Multivariable.py")
+    # run_simulation("Mixtures Multivariable.py")
